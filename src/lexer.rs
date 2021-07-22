@@ -1,8 +1,5 @@
 use crate::object::Value;
-use crate::parser::{Dyndata, FuncState};
 use crate::zio::Zio;
-
-use std::rc::Weak;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -102,14 +99,12 @@ pub struct LexState {
     lastline: i32,            /* line of last token 'consumed' */
     token: Token,             /* current token */
     lookahead: Option<Token>, /* look ahead token */
-    pub fs: Weak<FuncState>,  /* current function (parser) */
     //state: Weak<ThreadState>,
-    zio: Zio,            /* input stream */
+    zio: Zio, /* input stream */
     pub buff: Vec<char>, /* buffer for tokens */
-    //h: Table,         /* to avoid collection/reuse strings */
-    pub dyd: Dyndata, /* dynamic structures used by the parser */
-                      //source: String,   /* current source name */
-                      //envn: String      /* environment variable name */
+              //h: Table,         /* to avoid collection/reuse strings */
+              //source: String,   /* current source name */
+              //envn: String      /* environment variable name */
 }
 
 impl LexState {
@@ -120,12 +115,10 @@ impl LexState {
             lastline: 0,
             token: Token::TkEos,
             lookahead: None,
-            fs: Weak::new(),
             //state: Weak::new(),
             zio: Zio::new(input),
             buff: vec![],
             //h: Table::new(),
-            dyd: Dyndata::new(),
             //source: String::new(),
         };
     }

@@ -4,9 +4,12 @@
 pub enum Value {
     //gc: GCObject       /* collectable objects */
     //void *p;           /* light userdata */
-    RFunction(), /* light C functions */
-    Int(i32),             /* integer numbers */
-    Number(f32),          /* float numbers */
+    RFunction(),
+    Int(i32),
+    Number(f32),
+    Bool(bool),
+    Nil(),
+    KString(String), /* literal string */
 }
 
 impl Value {

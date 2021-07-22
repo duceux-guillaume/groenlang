@@ -1,7 +1,112 @@
 use crate::code::{BinOpr, UnOpr};
 use crate::lexer::{LexState, Token};
+use crate::object::Value;
 
 const UNARY_PRIORITY: u8 = 12; /* priority for unary operators */
+
+/*
+** Expression and variable descriptor.
+** Code generation for variables and expressions can be delayed to allow
+** optimizations; An 'expdesc' structure describes a potentially-delayed
+** variable/expression. It has a description of its "main" value plus a
+** list of conditional jumps that can also produce its value (generated
+** by short-circuit operators 'and'/'or').
+*/
+
+/* kinds of variables/expressions */
+#[derive(PartialEq)]
+enum ExpKind {
+    VVoid,  /* when 'expdesc' describes the last expression of a list,
+            this kind means an empty list (so, no expression) */
+    VNil,   /* constant nil */
+    VTrue,  /* constant true */
+    VFalse, /* constant false */
+    VKk,    /* constant in 'k'; info = index of constant in 'k' */
+    VKFlt,  /* floating constant; nval = numerical float value */
+    VKInt,  /* integer constant; ival = numerical integer value */
+    VKStr,  /* string constant; strval = TString address;
+            (string is fixed by the lexer) */
+    VNonReloc, /* expression has its value in a fixed register;
+               info = result register */
+    VLocal, /* local variable; var.ridx = register index;
+            var.vidx = relative index in 'actvar.arr'  */
+    VUpVal, /* upvalue variable; info = index of upvalue in 'upvalues' */
+    VConst, /* compile-time <const> variable;
+            info = absolute index in 'actvar.arr'  */
+    VIndexed, /* indexed variable;
+              ind.t = table register;
+              ind.idx = key's R index */
+    VIndexUp, /* indexed upvalue;
+              ind.t = table upvalue;
+              ind.idx = key's K index */
+    VIndexI, /* indexed variable with constant integer;
+             ind.t = table register;
+             ind.idx = key's value */
+    VIndexStr, /* indexed variable with literal string;
+               ind.t = table register;
+               ind.idx = key's K index */
+    VJmp, /* expression is a test/comparison;
+          info = pc of corresponding jump instruction */
+    VReloc,  /* expression can put result in any register;
+             info = instruction pc */
+    VCall,   /* expression is a function call; info = instruction pc */
+    VVararg, /* vararg expression; info = instruction pc */
+}
+
+/* expressions description */
+struct ExpDesc {
+    const_value: Option<Value>, /* value when a const expression */
+    kind: ExpKind,
+}
+
+impl ExpDesc {
+    fn new() -> ExpDesc {
+        return ExpDesc {
+            const_value: None,
+            kind: ExpKind::VVoid,
+        };
+    }
+
+    fn init(&mut self, k: ExpKind) {
+        self.kind = k;
+    }
+
+    fn has_multiple_return(&self) -> bool {
+        use ExpKind::*;
+        return match self.kind {
+            VCall | VVararg => true,
+            _ => false,
+        };
+    }
+
+    fn is_void(&self) -> bool {
+        return self.kind == ExpKind::VVoid;
+    }
+
+    fn has_jumps(&self) -> bool {
+        //TODO
+        return false;
+    }
+
+    /*
+     ** If expression is a constant, return its value
+     */
+    fn try_into_value(&self) -> Option<Value> {
+        if self.has_jumps() {
+            return None;
+        }
+        use ExpKind::*;
+        return match self.kind {
+            VFalse => Some(Value::Bool(false)),
+            VTrue => Some(Value::Bool(true)),
+            VNil => Some(Value::Nil()),
+            VKStr => Some(Value::KString(String::new())), //TODO
+            VConst => None,                               //TODO
+            //_ => return tonumeral(e, v); //TODO
+            _ => return None,
+        };
+    }
+}
 
 /* description of pending goto statements and label statements */
 //struct Labeldesc {
@@ -12,32 +117,37 @@ const UNARY_PRIORITY: u8 = 12; /* priority for unary operators */
 //close: i32,   /* goto that escapes upvalues */
 //}
 
-/* description of an active local variable */
-struct Vardesc {
-    name: String,
+#[derive(PartialEq)]
+enum VarKind {
+    Regular = 0,
+    Const = 1,
+    ToBeClosed = 2,
+    CompileTimeConstant = 3,
 }
 
-impl Vardesc {
-    fn new(name: String) -> Vardesc {
-        return Vardesc { name: name };
-    }
+struct VarDesc {
+    value: Value,
+    name: String, /* variable name */
+    kind: VarKind,
+    ridx: u8, /* register holding the variable */
 }
 
-/* dynamic structures used by the parser */
-pub struct Dyndata {
-    /* list of all active local variables */
-//lvar: Vec<Vardesc>,
-//gt: Vec<Labeldesc>,    /* list of pending gotos */
-//label: Vec<Labeldesc>, /* list of active labels */
-}
-
-impl Dyndata {
-    pub fn new() -> Dyndata {
-        return Dyndata {
-            //lvar: vec![],
-            //gt: vec![],
-            //label: vec![],
+impl VarDesc {
+    fn new(name: String, kind: VarKind) -> VarDesc {
+        return VarDesc {
+            value: Value::Nil(),
+            name: name,
+            kind: kind,
+            ridx: 0,
         };
+    }
+
+    fn in_register(&self) -> bool {
+        return self.kind != VarKind::CompileTimeConstant;
+    }
+
+    fn ridx(&self) -> u8 {
+        return self.ridx;
     }
 }
 
@@ -48,56 +158,65 @@ impl Dyndata {
 
 /* state needed to generate code for a given function */
 pub struct FuncState {
-    //f: Weak<Proto>,        /* current function header */
-//prev: Weak<FuncState>, /* enclosing function */
-//ls: Weak<LexState>,    /* lexical state */
-//bl: Weak<BlockCnt>,    /* chain of current blocks */
-//pc: i32,               /* next position to code (equivalent to 'ncode') */
-//lasttarget: i32,       /* 'label' of last 'jump label' */
-//previousline: i32,     /* last line that was saved in 'lineinfo' */
-//nk: i32,               /* number of elements in 'k' */
-//np: i32,               /* number of elements in 'p' */
-//nabslineinfo: i32,     /* number of elements in 'abslineinfo' */
-//firstlocal: i32,       /* index of first local var (in Dyndata array) */
-//firstlabel: i32,       /* index of first label (in 'dyd->label->arr') */
-//ndebugvars: i16,       /* number of elements in 'f->locvars' */
-//nactvar: u8,           /* number of active local variables */
-//nups: u8,              /* number of upvalues */
-//freereg: u8,           /* first free register */
-//iwthabs: u8,           /* instructions issued since last absolute line info */
-//needclose: u8,         /* function needs to close upvalues when returning */
+    actvar: Vec<VarDesc>, /* active local variables */
+                          //f: Weak<Proto>,        /* current function header */
+                          //prev: Weak<FuncState>, /* enclosing function */
+                          //ls: Weak<LexState>,    /* lexical state */
+                          //bl: Weak<BlockCnt>,    /* chain of current blocks */
+                          //pc: i32,               /* next position to code (equivalent to 'ncode') */
+                          //lasttarget: i32,       /* 'label' of last 'jump label' */
+                          //previousline: i32,     /* last line that was saved in 'lineinfo' */
+                          //nk: i32,               /* number of elements in 'k' */
+                          //np: i32,               /* number of elements in 'p' */
+                          //nabslineinfo: i32,     /* number of elements in 'abslineinfo' */
+                          //firstlocal: i32,       /* index of first local var (in Dyndata array) */
+                          //firstlabel: i32,       /* index of first label (in 'dyd->label->arr') */
+                          //ndebugvars: i16,       /* number of elements in 'f->locvars' */
+                          //nactvar: u8,           /* number of active local variables */
+                          //nups: u8,              /* number of upvalues */
+                          //freereg: u8,           /* first free register */
+                          //iwthabs: u8,           /* instructions issued since last absolute line info */
+                          //needclose: u8,         /* function needs to close upvalues when returning */
 }
 
 impl FuncState {
-    /*
     fn new() -> FuncState {
-        return FuncState {
-            //f: Weak::new(),
-            //prev: Weak::new(),
-            //ls: Weak::new(),
-            //bl: Weak::new(),
-            //pc: 0,
-            //lasttarget: 0,
-            //previousline: 0,
-            //nk: 0,
-            //np: 0,
-            //nabslineinfo: 0,
-            //firstlocal: 0,
-            //firstlabel: 0,
-            //ndebugvars: 0,
-            //nactvar: 0,
-            //nups: 0,
-            //freereg: 0,
-            //iwthabs: 0,
-            //needclose: 0,
-        };
+        return FuncState { actvar: vec![] };
     }
-    */
+
+    fn register(&mut self, v: VarDesc) {
+        self.actvar.push(v);
+    }
+
+    fn last(&mut self) -> Option<&mut VarDesc> {
+        return self.actvar.last_mut();
+    }
+
+    fn reglevel(&self, mut nvar: usize) -> usize {
+        while nvar > 0 {
+            nvar -= 1;
+            let vd = self.getlocalvardesc(nvar); /* get previous variable */
+            if vd.is_some() && vd.unwrap().in_register() {
+                /* is in a register? */
+                return vd.unwrap().ridx() as usize + 1;
+            }
+        }
+        return 0; /* no variables in registers */
+    }
+
+    /*
+     ** Return the "variable description" (VarDesc) of a given variable.
+     ** (Unless noted otherwise, all variables are referred to by their
+     ** compiler indices.)
+     */
+    fn getlocalvardesc(&self, vidx: usize) -> Option<&VarDesc> {
+        return self.actvar.get(vidx);
+    }
 }
 
 pub struct Parser {
     ls: LexState,
-    lvars: Vec<Vardesc>,
+    fs: FuncState,
 }
 
 impl Parser {
@@ -111,7 +230,7 @@ impl Parser {
     pub fn new(input: String) -> Parser {
         return Parser {
             ls: LexState::new(input),
-            lvars: vec![],
+            fs: FuncState::new(),
         };
     }
 
@@ -134,48 +253,50 @@ impl Parser {
      ** so it is handled in separate.
      */
     fn block_follow(&mut self, withuntil: bool) -> bool {
+        use Token::*;
         println!("parser:block_follow");
         return match self.ls.current() {
-            Token::TkElse => true,
-            Token::TkElseIf => true,
-            Token::TkEnd => true,
-            Token::TkEos => true,
-            Token::TkUntil => withuntil,
+            TkElse => true,
+            TkElseIf => true,
+            TkEnd => true,
+            TkEos => true,
+            TkUntil => withuntil,
             _ => false,
         };
     }
 
     fn statement(&mut self) {
+        use Token::*;
         println!("parser:statement");
         println!("parser:current:{:?}", self.ls.current());
         //int line = ls->linenumber;  /* may be needed for error messages */
         //enterlevel(ls); /* increment stack */
         match self.ls.current() {
-            Token::TkChar(';') => {
+            TkChar(';') => {
                 /* stat -> ';' (empty statement) */
                 self.ls.next(); /* skip ';' */
             }
-            Token::TkIf => { /* stat -> ifstat */
+            TkIf => { /* stat -> ifstat */
                 //ifstat(line);
             }
-            Token::TkWhile => { /* stat -> whilestat */
+            TkWhile => { /* stat -> whilestat */
                 //whilestat(ls, line);
             }
-            Token::TkDo => { /* stat -> DO block END */
+            TkDo => { /* stat -> DO block END */
                 //ls.next();  /* skip DO */
                 //block(ls);
                 //check_match(ls, TK_END, TK_DO, line);
             }
-            Token::TkFor => { /* stat -> forstat */
+            TkFor => { /* stat -> forstat */
                 //forstat(ls, line);
             }
-            Token::TkRepeat => { /* stat -> repeatstat */
+            TkRepeat => { /* stat -> repeatstat */
                 //repeatstat(ls, line);
             }
-            Token::TkFunction => { /* stat -> funcstat */
+            TkFunction => { /* stat -> funcstat */
                 //funcstat(ls, line);
             }
-            Token::TkLocal => {
+            TkLocal => {
                 /* stat -> localstat */
                 println!("let");
                 self.ls.next(); /* skip LOCAL */
@@ -184,25 +305,25 @@ impl Parser {
                 //else
                 self.localstat();
             }
-            Token::TkDbcolon => { /* stat -> label */
+            TkDbcolon => { /* stat -> label */
                 //luaX_next(ls);  /* skip double colon */
                 //labelstat(ls, str_checkname(ls), line);
             }
-            Token::TkReturn => { /* stat -> retstat */
+            TkReturn => { /* stat -> retstat */
                 //luaX_next(ls);  /* skip RETURN */
                 //retstat(ls);
             }
-            Token::TkBreak => { /* stat -> breakstat */
+            TkBreak => { /* stat -> breakstat */
                 //breakstat(ls);
             }
-            Token::TkGoto => { /* stat -> 'goto' NAME */
+            TkGoto => { /* stat -> 'goto' NAME */
                 //luaX_next(ls);  /* skip 'goto' */
                 //gotostat(ls);
             }
             _ => {
                 /* stat -> func | assignment */
                 println!("func | assignment");
-                //self.exprstat();
+                self.exprstat();
             }
         }
         //lua_assert(ls->fs->f->maxstacksize >= ls->fs->freereg &&
@@ -211,46 +332,51 @@ impl Parser {
         //leavelevel(ls);
     }
 
+    /* stat -> LOCAL NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
     fn localstat(&mut self) {
         println!("parser:localstat");
-        /* stat -> LOCAL NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
-        //FuncState *fs = ls->fs;
-        //int toclose = -1;  /* index of to-be-closed variable (if any) */
-        //Vardesc *var;  /* last variable */
+        let mut toclose: isize = -1; /* index of to-be-closed variable (if any) */
+        //VarDesc *var;  /* last variable */
         //int vidx, kind;  /* index and kind of last variable */
-        //int nvars = 0;
-        //int nexps;
-        //expdesc e;
-        //do {
-        self.new_localvar();
-        //  kind = getlocalattribute(ls);
-        //  getlocalvardesc(fs, vidx)->vd.kind = kind;
-        //  if (kind == RDKTOCLOSE) {  /* to-be-closed? */
-        //    if (toclose != -1)  /* one already present? */
-        //      luaK_semerror(ls, "multiple to-be-closed variables in local list");
-        //    toclose = fs->nactvar + nvars;
-        //  }
-        //  nvars++;
-        //} while (testnext(ls, ','));
-        if self.testnext(Token::TkChar('=')) {
-            self.explist();
+        let mut nvars = 1;
+        loop {
+            let var = self.new_localvar();
+            if var.kind == VarKind::ToBeClosed {
+                /* to-be-closed? */
+                if toclose != -1 {
+                    /* one already present? */
+                    self.error("multiple to-be-closed variables in local list");
+                }
+                toclose = self.fs.actvar.len() as isize + nvars;
+            }
+            nvars += 1;
+            if !self.testnext(Token::TkChar(',')) {
+                break;
+            }
         }
-        //else {
-        //  e.k = VVOID;
-        //  nexps = 0;
-        //}
-        //var = getlocalvardesc(fs, vidx);  /* get last variable */
-        //if (nvars == nexps &&  /* no adjustments? */
-        //    var->vd.kind == RDKCONST &&  /* last variable is const? */
-        //    luaK_exp2const(fs, &e, &var->k)) {  /* compile-time constant? */
-        //  var->vd.kind = RDKCTC;  /* variable is a compile-time constant */
-        //  adjustlocalvars(ls, nvars - 1);  /* exclude last variable */
-        //  fs->nactvar++;  /* but count it */
-        //}
-        //else {
-        //  adjust_assign(ls, nvars, nexps, &e);
-        //  adjustlocalvars(ls, nvars);
-        //}
+        let mut nexps = 1;
+        let mut exp = ExpDesc::new();
+        if self.testnext(Token::TkChar('=')) {
+            nexps = self.explist(&mut exp);
+        } else {
+            exp.init(ExpKind::VVoid);
+        }
+        let var = self.fs.last().unwrap(); /* get last variable */
+        if nvars == nexps as isize &&  /* no adjustments? */
+            var.kind == VarKind::Const
+        {
+            /* last variable is const? */
+            if let Some(value) = exp.try_into_value() {
+                /* compile-time constant? */
+                var.kind = VarKind::CompileTimeConstant; /* variable is a compile-time constant */
+                var.value = value;
+                self.adjustlocalvars((nvars - 1) as u8); /* exclude last variable */
+                //  fs->nactvar++;  /* but count it */
+            }
+        } else {
+            self.adjust_assign(nvars as u8, nexps, &exp);
+            self.adjustlocalvars(nvars as u8);
+        }
         //checktoclose(fs, toclose);
     }
 
@@ -267,14 +393,16 @@ impl Parser {
     /*
      ** Create a new local variable with the given 'name'
      */
-    fn new_localvar(&mut self) {
+    fn new_localvar(&mut self) -> &VarDesc {
         println!("new_localvar");
         if let Token::TkName(name) = self.ls.current().clone() {
-            self.lvars.push(Vardesc::new(name));
+            let kind = self.getlocalattribute();
+            self.fs.register(VarDesc::new(name, kind));
         } else {
             self.error("wanted a name");
         }
         self.ls.next();
+        return self.fs.last().unwrap();
     }
 
     fn error(&self, msg: &str) {
@@ -282,42 +410,39 @@ impl Parser {
     }
 
     /* Parse list of expression, return the number of expression in the list */
-    fn explist(&mut self) -> usize {
-        /* explist -> expr { ',' expr } */
+    /* explist -> expr { ',' expr } */
+    fn explist(&mut self, exp: &mut ExpDesc) -> u8 {
         println!("explist");
         let mut n = 1; /* at least one expression */
-        self.expr();
+        self.expr(exp);
         while self.testnext(Token::TkChar(',')) {
             //luaK_exp2nextreg(ls->fs, v);
-            self.expr();
+            self.expr(exp);
             n += 1;
         }
         return n;
     }
 
-    fn expr(&mut self) {
+    fn expr(&mut self, exp: &mut ExpDesc) {
         println!("expr");
-        self.subexpr(0);
+        self.subexpr(0, exp);
     }
 
     /*
      ** subexpr -> (simpleexp | unop subexpr) { binop subexpr }
      ** where 'binop' is any binary operator with a priority higher than 'limit'
      */
-    fn subexpr(&mut self, limit: u8) {
+    fn subexpr(&mut self, limit: u8, exp: &mut ExpDesc) -> Option<BinOpr> {
         println!("subexpr");
-        //BinOpr op;
-        //UnOpr uop;
         //self.enterlevel(); // incre recursive calls to prevent stack overflow ?
-
         if let Some(uop) = UnOpr::try_from(&self.ls.current()) {
             /* prefix (unary) operator? */
             //  int line = ls->linenumber;
             self.ls.next(); /* skip operator */
-            self.subexpr(UNARY_PRIORITY);
+            self.subexpr(UNARY_PRIORITY, exp);
         //  luaK_prefix(ls->fs, uop, v, line);
         } else {
-            self.simpleexp();
+            self.simpleexp(exp);
         }
         /* expand while operators have priorities higher than 'limit' */
         let mut op = BinOpr::try_from(&self.ls.current());
@@ -333,17 +458,99 @@ impl Parser {
             //  op = nextop;
         }
         //leavelevel(ls);
-        //return op;  /* return first untreated operator */
+        return op; /* return first untreated operator */
     }
 
     /* simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... | constructor | FUNCTION body | suffixedexp */
-    fn simpleexp(&mut self) {
+    fn simpleexp(&mut self, exp: &mut ExpDesc) {
+        use ExpKind::*;
         use Token::*;
         match self.ls.current() {
-            _ => {
-                //init_exp
-            }
+            TkFlt(_) => exp.init(VKFlt),
+            TkInt(_) => exp.init(VKInt),
+            TkNil => exp.init(VNil),
+            TkTrue => exp.init(VTrue),
+            TkFalse => exp.init(VFalse),
+            _ => {}
         }
         self.ls.next();
+    }
+
+    fn adjust_assign(&mut self, nvars: u8, nexps: u8, exp: &ExpDesc) {
+        let needed = nvars as i16 - nexps as i16; /* extra values needed */
+        if exp.has_multiple_return() {
+            /* last expression has multiple returns? */
+            let mut extra = needed + 1; /* discount last expression itself */
+            if extra < 0 {
+                extra = 0;
+            }
+            //self.set_returns(); /* last exp. provides the difference */
+        } else {
+            if !exp.is_void() { /* at least one expression? */
+                //luaK_exp2nextreg(fs, e);  /* close last expression */
+            }
+            if needed > 0 { /* missing values? */
+                //luaK_nil(fs, fs->freereg, needed);  /* complete with nils */
+            }
+        }
+        if needed > 0 {
+            //luaK_reserveregs(fs, needed);  /* registers for extra values */
+        } else {
+            //fs->freereg += needed;  /* remove extra values */
+        }
+    }
+
+    /*
+     ** Start the scope for the last 'nvars' created variables.
+     */
+    fn adjustlocalvars(&mut self, nvars: u8) {
+        //FuncState *fs = ls->fs;
+        //int reglevel = luaY_nvarstack(fs);
+        //int i;
+        //for (i = 0; i < nvars; i++) {
+        //    int vidx = fs->nactvar++;
+        //    VarDesc *var = getlocalvardesc(fs, vidx);
+        //    var->vd.ridx = reglevel++;
+        //    var->vd.pidx = registerlocalvar(ls, fs, var->vd.name);
+        //}
+    }
+
+    /* stat -> func | assignment */
+    fn exprstat(&mut self) {
+        //FuncState *fs = ls->fs;
+        //struct LHS_assign v;
+        //suffixedexp(ls, &v.v);
+        //if (ls->t.token == '=' || ls->t.token == ',') { /* stat -> assignment ? */
+        //  v.prev = NULL;
+        //  restassign(ls, &v, 1);
+        //}
+        //else {  /* stat -> func */
+        //  Instruction *inst;
+        //  check_condition(ls, v.v.k == VCALL, "syntax error");
+        //  inst = &getinstruction(fs, &v.v);
+        //  SETARG_C(*inst, 1);  /* call statement uses no results */
+        //}
+    }
+
+    /* ATTRIB -> ['<' Name '>'] */
+    fn getlocalattribute(&mut self) -> VarKind {
+        let mut attr: String = String::from("anonymous");
+        if self.testnext(Token::TkChar('<')) {
+            if let Token::TkName(name) = self.ls.current() {
+                attr = name.clone();
+            }
+            //TODO: raise error
+            self.ls.next(); /* move to '>' */
+            //TODO: check >
+            self.ls.next(); /* skip '>' */
+            if attr == "const" {
+                return VarKind::Const;
+            } else if attr == "close" {
+                return VarKind::ToBeClosed;
+            } else {
+                self.error("invalid attribute name");
+            }
+        }
+        return VarKind::Regular;
     }
 }
