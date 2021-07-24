@@ -34,27 +34,27 @@ impl BinOpr {
         use BinOpr::*;
         use Token::*;
         return match candidate {
-            TkChar('+') => Some(BoAdd),
-            TkChar('-') => Some(BoSub),
-            TkChar('*') => Some(BoMul),
-            TkChar('%') => Some(BoMod),
-            TkChar('^') => Some(BoPow),
-            TkChar('/') => Some(BoDiv),
-            TkIdiv => Some(BoIDiv),
-            TkChar('&') => Some(BoBand),
-            TkChar('|') => Some(BoBor),
-            TkChar('~') => Some(BoBXor),
-            TkShl => Some(BoShL),
-            TkShr => Some(BoShR),
-            TkConcat => Some(BoConcat),
-            TkNe => Some(BoNE),
-            TkEq => Some(BoEq),
-            TkChar('<') => Some(BoLT),
-            TkLe => Some(BoLE),
-            TkChar('>') => Some(BoGT),
-            TkGe => Some(BoGE),
-            TkAnd => Some(BoAnd),
-            TkOr => Some(BoOr),
+            Char('+') => Some(BoAdd),
+            Char('-') => Some(BoSub),
+            Char('*') => Some(BoMul),
+            Char('%') => Some(BoMod),
+            Char('^') => Some(BoPow),
+            Char('/') => Some(BoDiv),
+            Idiv => Some(BoIDiv),
+            Char('&') => Some(BoBand),
+            Char('|') => Some(BoBor),
+            Char('~') => Some(BoBXor),
+            Shl => Some(BoShL),
+            Shr => Some(BoShR),
+            Concat => Some(BoConcat),
+            Ne => Some(BoNE),
+            Eq => Some(BoEq),
+            Char('<') => Some(BoLT),
+            Le => Some(BoLE),
+            Char('>') => Some(BoGT),
+            Ge => Some(BoGE),
+            And => Some(BoAnd),
+            Or => Some(BoOr),
             _ => None,
         };
     }
@@ -95,10 +95,10 @@ impl UnOpr {
         use Token::*;
         use UnOpr::*;
         return match candidate {
-            TkChar('-') => Some(UoMinus),
-            TkChar('~') => Some(UoBNot),
-            TkChar('#') => Some(UoLen),
-            TkNot => Some(UoNot),
+            Char('-') => Some(UoMinus),
+            Char('~') => Some(UoBNot),
+            Char('#') => Some(UoLen),
+            Not => Some(UoNot),
             _ => None,
         };
     }

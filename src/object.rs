@@ -1,6 +1,7 @@
 /*
 ** Union of all Groenlang values
 */
+#[derive(Debug, Clone)]
 pub enum Value {
     //gc: GCObject       /* collectable objects */
     //void *p;           /* light userdata */
@@ -13,14 +14,13 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn try_from(value: &Vec<char>) -> Option<Self> {
-        let s: String = value.iter().collect();
-        let i = s.parse::<i32>();
+    pub fn try_from(value: String) -> Option<Self> {
+        let i = value.parse::<i32>();
         if i.is_ok() {
             /* try as an integer */
             return Some(Value::Int(i.unwrap()));
         }
-        let f = s.parse::<f32>();
+        let f = value.parse::<f32>();
         if f.is_ok() {
             /* else try as a float */
             return Some(Value::Number(f.unwrap()));

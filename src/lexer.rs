@@ -1,86 +1,81 @@
-use crate::object::Value;
 use crate::zio::Zio;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    TkChar(char),
+    Char(char),
     /* terminal symbols denoted by reserved words */
-    TkAnd,
-    TkBreak,
-    TkDo,
-    TkElse,
-    TkElseIf,
-    TkEnd,
-    TkFalse,
-    TkFor,
-    TkFunction,
-    TkGoto,
-    TkIf,
-    TkIn,
-    TkLocal,
-    TkNil,
-    TkNot,
-    TkOr,
-    TkRepeat,
-    TkReturn,
-    TkThen,
-    TkTrue,
-    TkUntil,
-    TkWhile,
+    And,
+    Break,
+    Do,
+    Else,
+    ElseIf,
+    False,
+    For,
+    Function,
+    Goto,
+    If,
+    In,
+    Let,
+    Nil,
+    Not,
+    Or,
+    Repeat,
+    Return,
+    True,
+    Until,
+    While,
     /* other terminal symbols */
-    TkIdiv,
-    TkConcat,
-    TkDots,
-    TkEq,
-    TkGe,
-    TkLe,
-    TkNe,
-    TkShl,
-    TkShr,
-    TkDbcolon,
-    TkEos,
-    TkFlt(f32),
-    TkInt(i32),
-    TkName(String),
-    TkSring,
+    Idiv,
+    Concat,
+    Dots,
+    Eq,
+    Ge,
+    Le,
+    Ne,
+    Shl,
+    Shr,
+    Dbcolon,
+    Eos,
+    Flt(String),
+    Int(String),
+    Name(String),
+    Sring,
 }
 
 impl Token {
     fn try_keyword(candidate: &String) -> Option<Self> {
         use Token::*;
         static KEYWORDS: &[(&str, Token)] = &[
-            ("and", TkAnd),
-            ("break", TkBreak),
-            ("do", TkDo),
-            ("else", TkElse),
-            ("elseif", TkElseIf),
-            ("end", TkEnd),
-            ("false", TkFalse),
-            ("for", TkFor),
-            ("function", TkFunction),
-            ("goto", TkGoto),
-            ("if", TkIf),
-            ("in", TkIn),
-            ("let", TkLocal),
-            ("nil", TkNil),
-            ("not", TkNot),
-            ("or", TkOr),
-            ("repeat", TkRepeat),
-            ("return", TkReturn),
-            ("then", TkThen),
-            ("true", TkTrue),
-            ("until", TkUntil),
-            ("while", TkWhile),
-            ("//", TkIdiv),
-            ("..", TkConcat),
-            ("...", TkDots),
-            ("==", TkEq),
-            (">=", TkGe),
-            ("<=", TkLe),
-            ("~=", TkNe),
-            ("<<", TkShl),
-            (">>", TkShr),
-            ("::", TkDbcolon),
+            ("and", And),
+            ("break", Break),
+            ("do", Do),
+            ("else", Else),
+            ("elseif", ElseIf),
+            ("false", False),
+            ("for", For),
+            ("function", Function),
+            ("goto", Goto),
+            ("if", If),
+            ("in", In),
+            ("let", Let),
+            ("nil", Nil),
+            ("not", Not),
+            ("or", Or),
+            ("repeat", Repeat),
+            ("return", Return),
+            ("true", True),
+            ("until", Until),
+            ("while", While),
+            ("//", Idiv),
+            ("..", Concat),
+            ("...", Dots),
+            ("==", Eq),
+            (">=", Ge),
+            ("<=", Le),
+            ("~=", Ne),
+            ("<<", Shl),
+            (">>", Shr),
+            ("::", Dbcolon),
         ];
         for (k, v) in KEYWORDS {
             if *k == candidate {
@@ -95,8 +90,8 @@ impl Token {
 functions */
 pub struct LexState {
     current: char,            /* current character (charint) */
-    linenumber: i32,          /* input line counter */
-    lastline: i32,            /* line of last token 'consumed' */
+    linenumber: usize,        /* input line counter */
+    lastline: usize,          /* line of last token 'consumed' */
     token: Token,             /* current token */
     lookahead: Option<Token>, /* look ahead token */
     //state: Weak<ThreadState>,
@@ -110,10 +105,10 @@ pub struct LexState {
 impl LexState {
     pub fn new(input: String) -> LexState {
         return LexState {
-            current: ' ',
+            current: '\n',
             linenumber: 0,
             lastline: 0,
-            token: Token::TkEos,
+            token: Token::Eos,
             lookahead: None,
             //state: Weak::new(),
             zio: Zio::new(input),
@@ -123,12 +118,15 @@ impl LexState {
         };
     }
 
+    pub fn linenumber(&self) -> usize {
+        return self.linenumber;
+    }
+
     pub fn current(&self) -> Token {
         return self.token.clone();
     }
 
     pub fn next(&mut self) {
-        let old = self.token.clone();
         self.lastline = self.linenumber;
         if let Some(t) = self.lookahead.take() {
             /* discharge it if any */
@@ -137,82 +135,86 @@ impl LexState {
         } else {
             self.token = self.lex() /* read next token */
         }
-        println!("lexer:next:{:?}->{:?}", old, self.token);
     }
 
     fn lex(&mut self) -> Token {
-        println!("lexer:lex");
-        println!("lexer:current:{}", self.current);
+        use Token::*;
         //luaZ_resetbuffer(ls->buff);
         loop {
             match self.current {
-                '\n' | '\r' => self.increment_line_number(),
-                ' ' | '\t' => self.next_char(),   /* spaces */
-                '-' => return Token::TkChar('-'), //TODO: comment ?
-                '[' => return Token::TkChar('['), //TODO: long string ?
+                '\n' | '\r' => {
+                    if !self.increment_line_number() {
+                        return Eos;
+                    }
+                }
+                ' ' | '\t' => {
+                    if !self.next_char() {
+                        return Eos;
+                    }
+                } /* spaces */
+                '-' => return Char('-'), //TODO: comment ?
+                '[' => return Char('['), //TODO: long string ?
                 '=' => {
-                    self.next_char();
-                    if matches!(self.current, '=') {
-                        return Token::TkEq;
+                    if self.next_char() && matches!(self.current, '=') {
+                        return Eq;
                     } /* '==' */
-                    return Token::TkChar('=');
+                    return Char('=');
                 }
                 '<' => {
                     self.next_char();
                     if matches!(self.current, '=') {
-                        return Token::TkLe;
+                        return Le;
                     } /* '<=' */
                     if matches!(self.current, '<') {
-                        return Token::TkShl;
+                        return Shl;
                     } /* '<<' */
-                    return Token::TkChar('<');
+                    return Char('<');
                 }
                 '>' => {
                     self.next_char();
                     if matches!(self.current, '=') {
-                        return Token::TkGe;
+                        return Ge;
                     } /* '>=' */
                     if matches!(self.current, '>') {
-                        return Token::TkShr;
+                        return Shr;
                     } /* '>>' */
-                    return Token::TkChar('>');
+                    return Char('>');
                 }
                 '/' => {
                     self.next_char();
                     if matches!(self.current, '/') {
-                        return Token::TkIdiv;
+                        return Idiv;
                     } /* '//' */
-                    return Token::TkChar('/');
+                    return Char('/');
                 }
                 '~' => {
                     //TODO use ! instead ?
                     self.next_char();
                     if matches!(self.current, '=') {
-                        return Token::TkNe;
+                        return Ne;
                     } /* '~=' */
-                    return Token::TkChar('~');
+                    return Char('~');
                 }
                 ':' => {
                     self.next_char();
                     if matches!(self.current, '=') {
-                        return Token::TkDbcolon;
+                        return Dbcolon;
                     } /* '::' */
-                    return Token::TkChar(':');
+                    return Char(':');
                 }
                 '\"' | '\'' => {
                     /* short literal strings */
                     //self.read_string()
-                    return Token::TkSring;
+                    return Sring;
                 }
                 '.' => {
                     /* '.', '..', '...', or number */
                     //TODO
-                    return Token::TkDots;
+                    return Dots;
                 }
                 '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => {
                     return self.read_numeral()
                 }
-                //TODO: EOZ
                 _ => {
                     if self.current.is_alphabetic() {
                         /* identifier or reserved word? */
@@ -228,12 +230,12 @@ impl LexState {
                             /* reserved word? */
                             return t.clone();
                         } else {
-                            return Token::TkName(name);
+                            return Name(name);
                         }
                     }
                     /* single-char tokens ('+', '*', '%', '{', '}', ...) */
-                    let t = Token::TkChar(self.current);
-                    self.next();
+                    let t = Char(self.current);
+                    self.next_char();
                     return t;
                 }
             }
@@ -249,58 +251,15 @@ impl LexState {
         return s;
     }
 
-    /* NUMBER */
-    /*
-     ** This function is quite liberal in what it accepts, as 'str2num'
-     ** will reject ill-formed numerals. Roughly, it accepts the following
-     ** pattern:
-     **
-     **   %d(%x|%.|([Ee][+-]?))* | 0[Xx](%x|%.|([Pp][+-]?))*
-     **
-     ** The only tricky part is to accept [+-] only after a valid exponent
-     ** mark, to avoid reading '3-4' or '0xe+1' as a single number.
-     **
-     ** The caller might have already read an initial dot.
-     */
     fn read_numeral(&mut self) -> Token {
-        println!("lex:read_numeral");
-        let first = self.current;
-        self.save_and_next();
-        let mut expo = "Ee";
-        if first == '0' && self.next_is_one_of("xX") {
-            /* hexadecimal? */
-            expo = "Pp";
-        }
-        loop {
-            if self.next_is_one_of(expo) {
-                /* exponent mark? */
-                self.next_is_one_of("-+"); /* optional exponent sign */
-            } else if self.current.is_ascii_digit() || self.current == '.' {
-                /* '%x|%.' */
-                self.save_and_next();
-            } else {
-                break;
+        let mut number_str = String::new();
+        while self.current.is_digit(10) {
+            number_str.push(self.current);
+            if !self.next_char() {
+                return Token::Int(number_str.to_owned());
             }
         }
-        if self.current.is_ascii_alphabetic() {
-            /* is numeral touching a letter? */
-            self.save_and_next(); /* force an error */ //TODO ? how to handle error ?
-        }
-        let obj = Value::try_from(&self.buff);
-        if obj.is_none() {
-            /* format error? */
-            self.lexerror();
-        }
-        if let Some(Value::Int(i)) = obj {
-            self.token = Token::TkInt(i);
-            return self.token.clone();
-        }
-        if let Some(Value::Number(n)) = obj {
-            self.token = Token::TkFlt(n);
-            return self.token.clone();
-        }
-        self.lexerror();
-        return Token::TkInt(0);
+        return Token::Int(number_str.to_owned());
     }
 
     fn next_is_one_of(&mut self, pat: &str) -> bool {
@@ -317,10 +276,13 @@ impl LexState {
         self.buff.push(c);
     }
 
-    fn next_char(&mut self) {
-        let old = self.current;
-        self.current = self.zio.next();
-        println!("lexer:next_char:{}->{}", old, self.current);
+    fn next_char(&mut self) -> bool {
+        if let Some(c) = self.zio.next() {
+            self.current = c;
+            return true;
+        }
+        self.current = '\n';
+        return false;
     }
 
     fn save_and_next(&mut self) {
@@ -332,22 +294,92 @@ impl LexState {
      ** increment line number and skips newline sequence (any of
      ** \n, \r, \n\r, or \r\n)
      */
-    fn increment_line_number(&mut self) {
+    fn increment_line_number(&mut self) -> bool {
         let old = self.current;
-        self.next_char(); /* skip '\n' or '\r' */
-        if self.current_is_new_line() && self.current != old {
-            self.next_char(); /* skip '\n\r' or '\r\n' */
+        if !self.next_char() {
+            /* skip '\n' or '\r' */
+            return false;
         }
-        //TODO?
-        //if (++ls->linenumber >= MAX_INT)
-        //lexerror(ls, "chunk has too many lines", 0);
+        if self.current_is_new_line() && self.current != old {
+            if !self.next_char() {
+                /* skip '\n\r' or '\r\n' */
+                return false;
+            }
+        }
+        return true;
     }
 
     fn current_is_new_line(&self) -> bool {
         matches!(self.current, '\n' | '\r')
     }
 
-    fn lexerror(&self) {
-        panic!("byebye error");
+    pub fn next_if_token(&mut self, c: Token) -> bool {
+        if self.token == c {
+            self.next();
+            return true;
+        }
+        return false;
+    }
+
+    pub fn next_if_char(&mut self, c: char) -> bool {
+        return self.next_if_token(Token::Char(c));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lexer_next_char() {
+        let mut lexer = LexState::new(String::from("="));
+        assert_eq!(lexer.next_char(), true);
+        assert_eq!(lexer.next_char(), false);
+    }
+
+    #[test]
+    fn lexer_increment_line_number() {
+        let mut lexer = LexState::new(String::from("="));
+        assert_eq!(lexer.increment_line_number(), true);
+        assert_eq!(lexer.increment_line_number(), false);
+    }
+
+    #[test]
+    fn lexer_next_if_token() {
+        let mut lexer = LexState::new(String::from("="));
+        assert_eq!(lexer.next_if_token(Token::Char('=')), false);
+        lexer.next();
+        assert_eq!(lexer.next_if_token(Token::Char('=')), true);
+    }
+
+    #[test]
+    fn lexer_next_if_char() {
+        let mut lexer = LexState::new(String::from("="));
+        assert_eq!(lexer.next_if_char('='), false);
+        lexer.next();
+        assert_eq!(lexer.next_if_char('='), true);
+    }
+
+    #[test]
+    fn lexer_simple_read_numeral() {
+        let numeral = String::from("5");
+        let mut lexer = LexState::new(numeral.clone());
+        lexer.next_char();
+        assert_eq!(lexer.read_numeral(), Token::Int(numeral));
+    }
+
+    #[test]
+    fn lexer_big_int_read_numeral() {
+        let numeral = String::from("1023456789");
+        let mut lexer = LexState::new(numeral.clone());
+        lexer.next_char();
+        assert_eq!(lexer.read_numeral(), Token::Int(numeral));
+    }
+
+    #[test]
+    fn lexer_eos_read_numeral() {
+        let mut lexer = LexState::new(String::from("66;"));
+        lexer.next_char();
+        assert_eq!(lexer.read_numeral(), Token::Int(String::from("66")));
     }
 }

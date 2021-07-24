@@ -14,16 +14,12 @@ impl Zio {
         };
     }
 
-    pub fn next(&mut self) -> char {
+    pub fn next(&mut self) -> Option<char> {
         if self.p < self.buf.len() {
             let c = self.buf[self.p];
             self.p += 1;
-            return c;
+            return Some(c);
         }
-        return self.fill();
-    }
-
-    fn fill(&mut self) -> char {
-        return '\n';
+        return None;
     }
 }
