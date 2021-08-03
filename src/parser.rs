@@ -20,36 +20,9 @@ enum ExpKind {
     Nil,      /* constant nil */
     True,     /* constant true */
     False,    /* constant false */
-    ConstK,   /* constant in 'k'; info = index of constant in 'k' */
     ConstFlt, /* floating constant; nval = numerical float value */
     ConstInt, /* integer constant; ival = numerical integer value */
-    ConstStr, /* string constant; strval = TString address;
-              (string is fixed by the lexer) */
-    NonReloc, /* expression has its value in a fixed register;
-              info = result register */
-    Local, /* local variable; var.ridx = register index;
-           var.vidx = relative index in 'actvar.arr'  */
-    UpVal, /* upvalue variable; info = index of upvalue in 'upvalues' */
-    Const, /* compile-time <const> variable;
-           info = absolute index in 'actvar.arr'  */
-    Indexed, /* indexed variable;
-             ind.t = table register;
-             ind.idx = key's R index */
-    IndexUp, /* indexed upvalue;
-             ind.t = table upvalue;
-             ind.idx = key's K index */
-    IndexI, /* indexed variable with constant integer;
-            ind.t = table register;
-            ind.idx = key's value */
-    IndexStr, /* indexed variable with literal string;
-              ind.t = table register;
-              ind.idx = key's K index */
-    Jump, /* expression is a test/comparison;
-          info = pc of corresponding jump instruction */
-    Reloc,  /* expression can put result in any register;
-            info = instruction pc */
-    Call,   /* expression is a function call; info = instruction pc */
-    Vararg, /* vararg expression; info = instruction pc */
+    Vararg,   /* vararg expression; info = instruction pc */
 }
 
 /* expressions description */
@@ -57,6 +30,7 @@ enum ExpKind {
 struct ExpDesc {
     literal_value: Option<Value>, /* value when a literal expression */
     kind: ExpKind,
+    var: Option<String>,
 }
 
 impl ExpDesc {
@@ -64,6 +38,7 @@ impl ExpDesc {
         return ExpDesc {
             literal_value: None,
             kind: ExpKind::Void,
+            var: None,
         };
     }
 
@@ -72,16 +47,10 @@ impl ExpDesc {
         self.literal_value = v;
     }
 
-    fn has_multiple_return(&self) -> bool {
-        use ExpKind::*;
-        return match self.kind {
-            Call | Vararg => true,
-            _ => false,
-        };
-    }
-
-    fn is_void(&self) -> bool {
-        return self.kind == ExpKind::Void;
+    fn init_var(&mut self, name: String) {
+        self.kind = ExpKind::Vararg;
+        self.literal_value = None;
+        self.var = Some(name);
     }
 
     fn has_jumps(&self) -> bool {
@@ -101,8 +70,7 @@ impl ExpDesc {
             False => Some(Value::Bool(false)),
             True => Some(Value::Bool(true)),
             Nil => Some(Value::Nil()),
-            Const => None,
-            ConstInt | ConstFlt | ConstStr => self.literal_value.clone(),
+            ConstInt | ConstFlt => self.literal_value.clone(),
             _ => return None,
         };
     }
@@ -117,42 +85,18 @@ impl ExpDesc {
 //close: i32,   /* goto that escapes upvalues */
 //}
 
-#[derive(Debug, PartialEq, Clone)]
-enum VarKind {
-    Regular = 0,
-    Const = 1,
-    ToBeClosed = 2,
-    CompileTimeConstant = 3,
-}
-
 #[derive(Debug, Clone)]
 struct VarDesc {
     value: Value,
     name: String, /* variable name */
-    kind: VarKind,
-    ridx: usize, /* register holding the variable */
 }
 
 impl VarDesc {
-    fn new(name: String, kind: VarKind) -> VarDesc {
+    fn new(name: String) -> VarDesc {
         return VarDesc {
             value: Value::Nil(),
             name: name,
-            kind: kind,
-            ridx: 0,
         };
-    }
-
-    fn in_register(&self) -> bool {
-        return self.kind != VarKind::CompileTimeConstant;
-    }
-
-    fn ridx(&self) -> usize {
-        return self.ridx;
-    }
-
-    fn set_ridx(&mut self, i: usize) {
-        self.ridx = i;
     }
 }
 
@@ -160,132 +104,77 @@ impl VarDesc {
 ** nodes for block list (list of active blocks)
 */
 struct Block {
-    isloop: bool,
     actvar: Vec<VarDesc>,
 }
 
 impl Block {
-    fn isloop(&self) -> bool {
-        return self.isloop;
+    fn get_mut(&mut self, name: String) -> Option<&mut VarDesc> {
+        for v in self.actvar.iter_mut() {
+            if v.name == name {
+                return Some(v);
+            }
+        }
+        return None;
+    }
+
+    fn get(&self, name: String) -> Option<VarDesc> {
+        for v in self.actvar.iter() {
+            if v.name == name {
+                return Some(v.clone());
+            }
+        }
+        return None;
+    }
+
+    fn register(&mut self, name: String) {
+        self.actvar.push(VarDesc::new(name));
     }
 }
 
 /* state needed to generate code for a given function */
 pub struct FuncState {
-    actvar: Vec<VarDesc>, /* active local variables */
-    blocks: Vec<Block>,
-    //f: Weak<Proto>,        /* current function header */
-    //prev: Weak<FuncState>, /* enclosing function */
-    //ls: Weak<LexState>,    /* lexical state */
-    //bl: Weak<BlockCnt>,    /* chain of current blocks */
-    //pc: i32,               /* next position to code (equivalent to 'ncode') */
-    //lasttarget: i32,       /* 'label' of last 'jump label' */
-    //previousline: i32,     /* last line that was saved in 'lineinfo' */
-    //nk: i32,               /* number of elements in 'k' */
-    //np: i32,               /* number of elements in 'p' */
-    //nabslineinfo: i32,     /* number of elements in 'abslineinfo' */
-    //firstlocal: i32,       /* index of first local var (in Dyndata array) */
-    //firstlabel: i32,       /* index of first label (in 'dyd->label->arr') */
-    //ndebugvars: i16,       /* number of elements in 'f->locvars' */
-    //nactvar: u8,           /* number of active local variables */
-    //nups: u8,              /* number of upvalues */
-    //freereg: u8,           /* first free register */
-    //iwthabs: u8,           /* instructions issued since last absolute line info */
-    //needclose: u8,         /* function needs to close upvalues when returning */
+    blocks: Vec<Block>, /* active local variables */
 }
 
 impl FuncState {
     fn new() -> FuncState {
-        return FuncState {
-            actvar: vec![],
-            blocks: vec![],
-        };
+        return FuncState { blocks: vec![] };
     }
 
-    fn register(&mut self, mut v: VarDesc) {
-        v.set_ridx(self.actvar.len());
-        self.actvar.push(v);
-    }
-
-    fn last(&mut self) -> Option<&mut VarDesc> {
-        return self.actvar.last_mut();
-    }
-
-    fn reglevel(&self, mut nvar: usize) -> usize {
-        while nvar > 0 {
-            nvar -= 1;
-            let vd = self.getlocalvardesc(nvar); /* get previous variable */
-            if vd.is_some() && vd.unwrap().in_register() {
-                /* is in a register? */
-                return vd.unwrap().ridx() as usize + 1;
+    fn write(&mut self, name: String, value: Value) -> Result<()> {
+        for bl in self.blocks.iter_mut() {
+            if let Some(var) = bl.get_mut(name.clone()) {
+                var.value = value;
+                return Ok(());
             }
         }
-        return 0; /* no variables in registers */
+        return Err(Error::semantic(0, name, "unknown".to_owned()));
     }
 
-    /*
-     ** Return the "variable description" (VarDesc) of a given variable.
-     */
-    fn getlocalvardesc(&self, vidx: usize) -> Option<&VarDesc> {
-        return self.actvar.get(vidx);
-    }
-
-    fn goiftrue(&mut self, exp: &ExpDesc) {
-        self.dischargevars(exp);
-        match &exp.literal_value {
-            VJmp => {
-                /* condition? */
-                self.negatecondition(exp); /* jump when it is false */
-                //pc = e->u.info;  /* save jump position */
-            }
-            _ => { //TODO}
+    fn value(&self, name: String) -> Result<Value> {
+        for bl in self.blocks.iter() {
+            if let Some(var) = bl.get(name.clone()) {
+                return Ok(var.value);
             }
         }
+        return Err(Error::semantic(0, name, "unknown".to_owned()));
     }
 
-    fn dischargevars(&mut self, exp: &ExpDesc) {}
+    fn register(&mut self, name: String) {
+        if self.blocks.len() == 0 {
+            self.enter_block();
+        }
+        self.blocks.last_mut().unwrap().register(name);
+    }
 
-    fn negatecondition(&mut self, exp: &ExpDesc) {}
-
-    fn enter_block(&mut self, isloop: bool) {
-        let bl = Block {
-            isloop: isloop,
-            actvar: self.actvar.clone(),
-        };
-        //bl->firstlabel = fs->ls->dyd->label.n;
-        //bl->firstgoto = fs->ls->dyd->gt.n;
-        //bl->upval = 0;
-        //bl->insidetbc = (fs->bl != NULL && fs->bl->insidetbc);
-        //bl->previous = fs->bl;
+    fn enter_block(&mut self) {
+        let bl = Block { actvar: vec![] };
         self.blocks.push(bl);
-        //lua_assert(fs->freereg == luaY_nvarstack(fs));
     }
 
     fn leave_block(&mut self) {
-        let hasblock = self.blocks.pop();
-        if hasblock.is_none() {
-            return;
-        }
-        let bl = hasblock.unwrap();
-        let hasclose = false;
-        //int stklevel = reglevel(fs, bl->nactvar);  /* level outside the block */
-        if bl.isloop() { /* fix pending breaks? */
-            //hasclose = createlabel(ls, luaS_newliteral(ls->L, "break"), 0, 0);
-        }
-        //if (!hasclose && bl->previous && bl->upval) {
-        //  luaK_codeABC(fs, OP_CLOSE, stklevel, 0, 0);
-        //}
-        //removevars(fs, bl->nactvar);
-        //lua_assert(bl->nactvar == fs->nactvar);
-        //fs->freereg = stklevel;  /* free registers */
-        //ls->dyd->label.n = bl->firstlabel;  /* remove local labels */
-        //if (bl->previous) { /* inner block? */
-        //  movegotosout(fs, bl);  /* update pending gotos to outer block */
-        //}
-        //else {
-        //  if (bl->firstgoto < ls->dyd->gt.n)  /* pending gotos in outer block? */
-        //    undefgoto(ls, &ls->dyd->gt.arr[bl->firstgoto]);  /* error */
-        //}
+        self.blocks.pop();
+        // Clean vars
     }
 }
 
@@ -350,7 +239,7 @@ impl Parser {
             }
             If => {
                 /* stat -> ifstat */
-                self.ifstat(self.ls.linenumber())?;
+                self.ifstat()?;
             }
             While => { /* stat -> whilestat */
                 //whilestat(ls, line);
@@ -358,7 +247,7 @@ impl Parser {
             Do => {
                 /* stat -> DO block END */
                 self.ls.next(); /* skip DO */
-                self.block();
+                self.block()?;
                 self.expect_next(Char('}'))?;
             }
             For => { /* stat -> forstat */
@@ -410,26 +299,30 @@ impl Parser {
 
     /* stat -> LOCAL NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
     fn letstat(&mut self) -> Result<()> {
-        self.new_localvar()?;
+        let new_var_name = self.new_localvar()?;
         let mut exp = ExpDesc::new();
         self.expect_next(Token::Char('='))?;
         self.expression(&mut exp)?;
-        println!("let expr => {:?}", exp);
         let const_var = exp.try_into_value();
         if let Some(v) = const_var {
-            let var = self.fs.last().unwrap();
-            var.value = v;
-            println!("new var => {:?}", var);
+            self.fs.write(new_var_name.clone(), v.clone())?;
+            println!("new var => {}={:?}", new_var_name, v);
+        } else if exp.kind == ExpKind::Vararg {
+            let v = self.fs.value(exp.var.unwrap())?;
+            self.fs.write(new_var_name.clone(), v.clone())?;
+            println!("new var => {}={:?}", new_var_name, v);
         }
         return Ok(());
     }
 
     /*
-     ** Create a new local variable with the given 'name'
+     ** Create a new local variable with the given 'name' and return it
      */
-    fn new_localvar(&mut self) -> Result<()> {
+    fn new_localvar(&mut self) -> Result<String> {
         if let Token::Name(name) = self.ls.current() {
-            self.fs.register(VarDesc::new(name, VarKind::Regular));
+            self.fs.register(name.clone());
+            self.ls.next();
+            return Ok(name);
         } else {
             return Err(Error::syntactical(
                 self.ls.linenumber(),
@@ -437,21 +330,6 @@ impl Parser {
                 self.ls.current().to_string(),
             ));
         }
-        self.ls.next();
-        return Ok(());
-    }
-
-    /* Parse list of expression, return the number of expression in the list */
-    /* explist -> expression { ',' expression } */
-    fn explist(&mut self, exp: &mut ExpDesc) -> Result<u8> {
-        let mut n = 1; /* at least one expression */
-        self.expression(exp)?;
-        while self.ls.next_if_char(',') {
-            //luaK_exp2nextreg(ls->fs, v);
-            self.expression(exp)?;
-            n += 1;
-        }
-        return Ok(n);
     }
 
     fn expression(&mut self, exp: &mut ExpDesc) -> Result<()> {
@@ -488,7 +366,7 @@ impl Parser {
             let mut right_exp = ExpDesc::new();
             opt = self.subexpression(op.right_priority(), &mut right_exp)?;
             /* Apply the operator */
-            self.apply_binop(op, exp, right_exp);
+            self.apply_binop(op, exp, right_exp)?;
         }
         //leavelevel(ls);
         return Ok(opt); /* return first untreated operator */
@@ -504,20 +382,33 @@ impl Parser {
     }
 
     fn apply_uop(&mut self, op: UnOpr, exp: &mut ExpDesc) -> Result<()> {
-        return match exp.literal_value {
-            Some(Value::Int(i)) => {
-                exp.literal_value = Some(Value::Int(-i));
-                Ok(())
-            }
-            Some(Value::Number(n)) => {
-                exp.literal_value = Some(Value::Number(-n));
-                Ok(())
-            }
-            _ => Err(Error::semantic(
-                self.ls.linenumber(),
-                "<number>".to_owned(),
-                self.ls.current().to_string(),
-            )),
+        return match op {
+            UnOpr::Minus => match exp.literal_value {
+                Some(Value::Int(i)) => {
+                    exp.literal_value = Some(Value::Int(-i));
+                    Ok(())
+                }
+                Some(Value::Number(n)) => {
+                    exp.literal_value = Some(Value::Number(-n));
+                    Ok(())
+                }
+                _ => Err(Error::semantic(
+                    self.ls.linenumber(),
+                    "<number>".to_owned(),
+                    self.ls.current().to_string(),
+                )),
+            },
+            UnOpr::Not => match exp.literal_value {
+                Some(Value::Bool(b)) => {
+                    exp.literal_value = Some(Value::Bool(!b));
+                    Ok(())
+                }
+                _ => Err(Error::semantic(
+                    self.ls.linenumber(),
+                    "<number>".to_owned(),
+                    self.ls.current().to_string(),
+                )),
+            },
         };
     }
 
@@ -530,33 +421,10 @@ impl Parser {
             Token::Nil => exp.init(Nil, None),
             Token::True => exp.init(True, None),
             Token::False => exp.init(False, None),
+            Token::Name(name) => exp.init_var(name),
             _ => {}
         }
         self.ls.next();
-    }
-
-    fn adjust_assign(&mut self, nvars: u8, nexps: u8, exp: &ExpDesc) {
-        let needed = nvars as i16 - nexps as i16; /* extra values needed */
-        if exp.has_multiple_return() {
-            /* last expression has multiple returns? */
-            let mut extra = needed + 1; /* discount last expression itself */
-            if extra < 0 {
-                extra = 0;
-            }
-        //self.set_returns(); /* last exp. provides the difference */
-        } else {
-            if !exp.is_void() { /* at least one expression? */
-                //luaK_exp2nextreg(fs, e);  /* close last expression */
-            }
-            if needed > 0 { /* missing values? */
-                //luaK_nil(fs, fs->freereg, needed);  /* complete with nils */
-            }
-        }
-        if needed > 0 {
-            //luaK_reserveregs(fs, needed);  /* registers for extra values */
-        } else {
-            //fs->freereg += needed;  /* remove extra values */
-        }
     }
 
     /* stat -> func | assignment */
@@ -577,14 +445,14 @@ impl Parser {
     }
 
     /* ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END */
-    fn ifstat(&mut self, line: usize) -> Result<()> {
+    fn ifstat(&mut self) -> Result<()> {
         //let escapelist = NO_JUMP;  /* exit list for finished parts */
         self.test_then_block()?; /* IF cond THEN block */
         while self.ls.current() == Token::ElseIf {
             self.test_then_block()?; /* ELSEIF cond THEN block */
         }
         if self.ls.next_if_token(Token::Else) {
-            self.block(); /* 'else' part */
+            self.block()?; /* 'else' part */
         }
         self.expect_next(Token::Char('}'))?;
         //luaK_patchtohere(fs, escapelist);  /* patch escape list to 'if' end */
@@ -597,14 +465,14 @@ impl Parser {
         //int jf;  /* instruction to skip 'then' code (if condition is false) */
         self.ls.next(); /* skip IF or ELSEIF */
         let mut cond_expr = ExpDesc::new();
-        self.expression(&mut cond_expr); /* read condition */
+        self.expression(&mut cond_expr)?; /* read condition */
         self.expect_next(Token::Char('{'))?;
         if self.ls.current() == Token::Break {
             /* 'if x then break' ? */
             //let line = self.ls.linenumber();
             //luaK_goiffalse(ls->fs, &v);  /* will jump if condition is true */
             self.ls.next(); /* skip 'break' */
-            self.fs.enter_block(false); /* must enter block before 'goto' */
+            self.fs.enter_block(); /* must enter block before 'goto' */
             //newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
             while self.ls.next_if_char(';') {} /* skip semicolons */
             if self.block_follow(false) {
@@ -617,10 +485,10 @@ impl Parser {
         } else {
             /* regular case (not a break) */
             //luaK_goiftrue(ls->fs, &v);  /* skip over block if condition is false */
-            self.fs.enter_block(false);
+            self.fs.enter_block();
             //jf = v.f;
         }
-        self.statlist(); /* 'then' part */
+        self.statlist()?; /* 'then' part */
         self.fs.leave_block();
         if self.ls.current() == Token::Else || self.ls.current() == Token::ElseIf { /* followed by 'else'/'elseif'? */
             //luaK_concat(fs, escapelist, luaK_jump(fs));  /* must jump over it */
@@ -640,23 +508,13 @@ impl Parser {
         return Ok(());
     }
 
-    fn expect_current(&mut self, t: Token) -> Result<()> {
-        if std::mem::discriminant(&self.ls.current()) != std::mem::discriminant(&t) {
-            return Err(Error::syntactical(
-                self.ls.linenumber(),
-                t.to_string(),
-                self.ls.current().to_string(),
-            ));
-        }
-        return Ok(());
-    }
-
-    fn block(&mut self) {
+    fn block(&mut self) -> Result<()> {
         /* block -> statlist */
         //FuncState *fs = ls->fs;
         //BlockCnt bl;
         //enterblock(fs, &bl, 0);
-        self.statlist();
+        self.statlist()?;
         //leaveblock(fs);
+        return Ok(());
     }
 }
