@@ -1,4 +1,5 @@
 mod code;
+mod error;
 mod lexer;
 mod object;
 pub mod parser;

@@ -1,24 +1,7 @@
 use crate::code::{BinOpr, UnOpr};
+use crate::error::{Error, Result};
 use crate::lexer::{LexState, Token};
 use crate::object::Value;
-
-type ParserResult<T> = std::result::Result<T, ParsingError>;
-#[derive(Debug, Clone)]
-pub struct ParsingError {
-    line: usize,
-    expected_token: Token,
-    current_token: Token,
-}
-
-impl ParsingError {
-    fn new(l: usize, e: Token, c: Token) -> ParsingError {
-        return ParsingError {
-            line: l,
-            expected_token: e,
-            current_token: c,
-        };
-    }
-}
 
 /*
 ** Expression and variable descriptor.
@@ -312,7 +295,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn eval(s: String) -> ParserResult<()> {
+    pub fn eval(s: String) -> Result<()> {
         let mut p = Parser::new(s);
         p.ls.next();
         println!("eval: {:?}", p.ls.current());
@@ -326,7 +309,7 @@ impl Parser {
         };
     }
 
-    fn statlist(&mut self) -> ParserResult<()> {
+    fn statlist(&mut self) -> Result<()> {
         /* statlist -> { stat [';'] } */
         while !self.block_follow(true) {
             if self.ls.current() == Token::Return {
@@ -355,7 +338,7 @@ impl Parser {
         };
     }
 
-    fn statement(&mut self) -> ParserResult<()> {
+    fn statement(&mut self) -> Result<()> {
         use Token::*;
         println!("statement => {:?}", self.ls.current());
         //int line = ls->linenumber;  /* may be needed for error messages */
@@ -426,11 +409,11 @@ impl Parser {
     }
 
     /* stat -> LOCAL NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
-    fn letstat(&mut self) -> ParserResult<()> {
+    fn letstat(&mut self) -> Result<()> {
         self.new_localvar()?;
         let mut exp = ExpDesc::new();
         self.expect_next(Token::Char('='))?;
-        self.expression(&mut exp);
+        self.expression(&mut exp)?;
         println!("let expr => {:?}", exp);
         let const_var = exp.try_into_value();
         if let Some(v) = const_var {
@@ -444,14 +427,14 @@ impl Parser {
     /*
      ** Create a new local variable with the given 'name'
      */
-    fn new_localvar(&mut self) -> ParserResult<()> {
+    fn new_localvar(&mut self) -> Result<()> {
         if let Token::Name(name) = self.ls.current() {
             self.fs.register(VarDesc::new(name, VarKind::Regular));
         } else {
-            return Err(ParsingError::new(
+            return Err(Error::syntactical(
                 self.ls.linenumber(),
-                Token::Name("<name>".to_owned()),
-                self.ls.current(),
+                "<name>".to_owned(),
+                self.ls.current().to_string(),
             ));
         }
         self.ls.next();
@@ -460,26 +443,27 @@ impl Parser {
 
     /* Parse list of expression, return the number of expression in the list */
     /* explist -> expression { ',' expression } */
-    fn explist(&mut self, exp: &mut ExpDesc) -> u8 {
+    fn explist(&mut self, exp: &mut ExpDesc) -> Result<u8> {
         let mut n = 1; /* at least one expression */
-        self.expression(exp);
+        self.expression(exp)?;
         while self.ls.next_if_char(',') {
             //luaK_exp2nextreg(ls->fs, v);
-            self.expression(exp);
+            self.expression(exp)?;
             n += 1;
         }
-        return n;
+        return Ok(n);
     }
 
-    fn expression(&mut self, exp: &mut ExpDesc) {
-        self.subexpression(0, exp);
+    fn expression(&mut self, exp: &mut ExpDesc) -> Result<()> {
+        self.subexpression(0, exp)?;
+        return Ok(());
     }
 
     /*
      ** subexpression -> (simpleexp | unop subexpression) { binop subexpression }
      ** where 'binop' is any binary operator with a priority higher than 'limit'
      */
-    fn subexpression(&mut self, limit: u8, exp: &mut ExpDesc) -> ParserResult<Option<BinOpr>> {
+    fn subexpression(&mut self, limit: u8, exp: &mut ExpDesc) -> Result<Option<BinOpr>> {
         //self.enterlevel(); // incre recursive calls to prevent stack overflow ?
         if let Some(uop) = UnOpr::try_from(&self.ls.current()) {
             /* prefix (unary) operator? */
@@ -515,11 +499,11 @@ impl Parser {
         op: BinOpr,
         left_exp: &mut ExpDesc,
         right_exp: ExpDesc,
-    ) -> ParserResult<()> {
+    ) -> Result<()> {
         return Ok(());
     }
 
-    fn apply_uop(&mut self, op: UnOpr, exp: &mut ExpDesc) -> ParserResult<()> {
+    fn apply_uop(&mut self, op: UnOpr, exp: &mut ExpDesc) -> Result<()> {
         return match exp.literal_value {
             Some(Value::Int(i)) => {
                 exp.literal_value = Some(Value::Int(-i));
@@ -529,10 +513,10 @@ impl Parser {
                 exp.literal_value = Some(Value::Number(-n));
                 Ok(())
             }
-            _ => Err(ParsingError::new(
+            _ => Err(Error::semantic(
                 self.ls.linenumber(),
-                self.ls.current(),
-                self.ls.current(),
+                "<number>".to_owned(),
+                self.ls.current().to_string(),
             )),
         };
     }
@@ -593,7 +577,7 @@ impl Parser {
     }
 
     /* ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END */
-    fn ifstat(&mut self, line: usize) -> ParserResult<()> {
+    fn ifstat(&mut self, line: usize) -> Result<()> {
         //let escapelist = NO_JUMP;  /* exit list for finished parts */
         self.test_then_block()?; /* IF cond THEN block */
         while self.ls.current() == Token::ElseIf {
@@ -608,7 +592,7 @@ impl Parser {
     }
 
     /* test_then_block -> [IF | ELSEIF] cond THEN block */
-    fn test_then_block(&mut self) -> ParserResult<()> {
+    fn test_then_block(&mut self) -> Result<()> {
         //expdesc v;
         //int jf;  /* instruction to skip 'then' code (if condition is false) */
         self.ls.next(); /* skip IF or ELSEIF */
@@ -645,23 +629,23 @@ impl Parser {
         return Ok(());
     }
 
-    fn expect_next(&mut self, t: Token) -> ParserResult<()> {
+    fn expect_next(&mut self, t: Token) -> Result<()> {
         if !self.ls.next_if_token(t.clone()) {
-            return Err(ParsingError::new(
+            return Err(Error::syntactical(
                 self.ls.linenumber(),
-                t,
-                self.ls.current(),
+                t.to_string(),
+                self.ls.current().to_string(),
             ));
         }
         return Ok(());
     }
 
-    fn expect_current(&mut self, t: Token) -> ParserResult<()> {
+    fn expect_current(&mut self, t: Token) -> Result<()> {
         if std::mem::discriminant(&self.ls.current()) != std::mem::discriminant(&t) {
-            return Err(ParsingError::new(
+            return Err(Error::syntactical(
                 self.ls.linenumber(),
-                t,
-                self.ls.current(),
+                t.to_string(),
+                self.ls.current().to_string(),
             ));
         }
         return Ok(());

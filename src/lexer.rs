@@ -84,6 +84,12 @@ impl Token {
     }
 }
 
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /* state of the lexer plus state of the parser when shared by all
 functions */
 pub struct LexState {
