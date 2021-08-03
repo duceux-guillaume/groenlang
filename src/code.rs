@@ -126,16 +126,11 @@ impl UnOpr {
     pub fn apply(self, v: &Value) -> Option<Value> {
         use UnOpr::*;
         use Value::*;
-        return match self {
-            Minus => match v {
-                Int(i) => Some(Int(-i)),
-                Number(f) => Some(Number(-f)),
-                _ => None,
-            },
-            Not => match v {
-                Bool(b) => Some(Bool(!b)),
-                _ => None,
-            },
+        return match (self, v) {
+            (Minus, Int(i)) => Some(Int(-i)),
+            (Minus, Number(f)) => Some(Number(-f)),
+            (Not, Bool(b)) => Some(Bool(!b)),
+            (_, _) => None,
         };
     }
 

@@ -1,5 +1,5 @@
 use crate::code::{BinOpr, UnOpr};
-use crate::error::{Error, Result};
+use crate::error::{Error, GResult};
 use crate::lexer::{LexState, Token};
 use crate::object::Value;
 
@@ -18,8 +18,7 @@ enum ExpKind {
     Void,     /* when 'expdesc' describes the last expression of a list,
               this kind means an empty list (so, no expression) */
     Nil,      /* constant nil */
-    True,     /* constant true */
-    False,    /* constant false */
+    Bool,     /* constant true or false */
     ConstFlt, /* floating constant; nval = numerical float value */
     ConstInt, /* integer constant; ival = numerical integer value */
     Vararg,   /* vararg expression; info = instruction pc */
@@ -67,10 +66,8 @@ impl ExpDesc {
         }
         use ExpKind::*;
         return match self.kind {
-            False => Some(Value::Bool(false)),
-            True => Some(Value::Bool(true)),
             Nil => Some(Value::Nil()),
-            ConstInt | ConstFlt => self.literal_value.clone(),
+            Bool | ConstInt | ConstFlt => self.literal_value.clone(),
             _ => return None,
         };
     }
@@ -141,7 +138,7 @@ impl FuncState {
         return FuncState { blocks: vec![] };
     }
 
-    fn write(&mut self, name: String, value: Value) -> Result<()> {
+    fn write(&mut self, name: String, value: Value) -> GResult<()> {
         for bl in self.blocks.iter_mut() {
             if let Some(var) = bl.get_mut(name.clone()) {
                 var.value = value;
@@ -151,7 +148,7 @@ impl FuncState {
         return Err(Error::semantic(0, name, "unknown".to_owned()));
     }
 
-    fn value(&self, name: String) -> Result<Value> {
+    fn value(&self, name: String) -> GResult<Value> {
         for bl in self.blocks.iter() {
             if let Some(var) = bl.get(name.clone()) {
                 return Ok(var.value);
@@ -184,10 +181,9 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn eval(s: String) -> Result<()> {
+    pub fn eval(s: String) -> GResult<()> {
         let mut p = Parser::new(s);
-        p.ls.next();
-        println!("eval: {:?}", p.ls.current());
+        p.ls.next()?;
         return p.statlist();
     }
 
@@ -198,7 +194,7 @@ impl Parser {
         };
     }
 
-    fn statlist(&mut self) -> Result<()> {
+    fn statlist(&mut self) -> GResult<()> {
         /* statlist -> { stat [';'] } */
         while !self.block_follow(true) {
             if self.ls.current() == Token::Return {
@@ -207,7 +203,6 @@ impl Parser {
             }
             self.statement()?;
         }
-        println!("statlist => {:?}", self.ls.current());
         return Ok(());
     }
 
@@ -227,15 +222,13 @@ impl Parser {
         };
     }
 
-    fn statement(&mut self) -> Result<()> {
+    fn statement(&mut self) -> GResult<()> {
         use Token::*;
-        println!("statement => {:?}", self.ls.current());
-        //int line = ls->linenumber;  /* may be needed for error messages */
         //enterlevel(ls); /* increment stack */
         match self.ls.current() {
             Char(';') => {
                 /* stat -> ';' (empty statement) */
-                self.ls.next(); /* skip ';' */
+                self.ls.next()?; /* skip ';' */
             }
             If => {
                 /* stat -> ifstat */
@@ -246,7 +239,7 @@ impl Parser {
             }
             Do => {
                 /* stat -> DO block END */
-                self.ls.next(); /* skip DO */
+                self.ls.next()?; /* skip DO */
                 self.block()?;
                 self.expect_next(Char('}'))?;
             }
@@ -261,7 +254,7 @@ impl Parser {
             }
             Let => {
                 /* stat -> localstat */
-                self.ls.next(); /* skip LOCAL */
+                self.ls.next()?; /* skip LOCAL */
                 //if (testnext(ls, TK_FUNCTION))  /* local function? */
                 //  localfunc(ls);
                 //else
@@ -269,12 +262,12 @@ impl Parser {
             }
             Dbcolon => {
                 /* stat -> label */
-                self.ls.next(); /* skip double colon */
+                self.ls.next()?; /* skip double colon */
                 //labelstat(ls, str_checkname(ls), line);
             }
             Return => {
                 /* stat -> retstat */
-                self.ls.next(); /* skip RETURN */
+                self.ls.next()?; /* skip RETURN */
                 //retstat(ls);
             }
             Break => { /* stat -> breakstat */
@@ -282,7 +275,7 @@ impl Parser {
             }
             Goto => {
                 /* stat -> 'goto' NAME */
-                self.ls.next(); /* skip 'goto' */
+                self.ls.next()?; /* skip 'goto' */
                 //gotostat(ls);
             }
             _ => {
@@ -298,19 +291,25 @@ impl Parser {
     }
 
     /* stat -> LOCAL NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
-    fn letstat(&mut self) -> Result<()> {
+    fn letstat(&mut self) -> GResult<()> {
         let new_var_name = self.new_localvar()?;
         let mut exp = ExpDesc::new();
         self.expect_next(Token::Char('='))?;
         self.expression(&mut exp)?;
-        let const_var = exp.try_into_value();
-        if let Some(v) = const_var {
+        println!("let exp => {:?}", exp);
+        if let Some(v) = exp.try_into_value() {
             self.fs.write(new_var_name.clone(), v.clone())?;
             println!("new var => {}={:?}", new_var_name, v);
         } else if exp.kind == ExpKind::Vararg {
             let v = self.fs.value(exp.var.unwrap())?;
             self.fs.write(new_var_name.clone(), v.clone())?;
             println!("new var => {}={:?}", new_var_name, v);
+        } else {
+            return Err(Error::semantic(
+                self.ls.linenumber(),
+                "value".to_string(),
+                "something".to_owned(),
+            ));
         }
         return Ok(());
     }
@@ -318,10 +317,10 @@ impl Parser {
     /*
      ** Create a new local variable with the given 'name' and return it
      */
-    fn new_localvar(&mut self) -> Result<String> {
+    fn new_localvar(&mut self) -> GResult<String> {
         if let Token::Name(name) = self.ls.current() {
             self.fs.register(name.clone());
-            self.ls.next();
+            self.ls.next()?;
             return Ok(name);
         } else {
             return Err(Error::syntactical(
@@ -332,7 +331,7 @@ impl Parser {
         }
     }
 
-    fn expression(&mut self, exp: &mut ExpDesc) -> Result<()> {
+    fn expression(&mut self, exp: &mut ExpDesc) -> GResult<()> {
         self.subexpression(0, exp)?;
         return Ok(());
     }
@@ -341,27 +340,25 @@ impl Parser {
      ** subexpression -> (simpleexp | unop subexpression) { binop subexpression }
      ** where 'binop' is any binary operator with a priority higher than 'limit'
      */
-    fn subexpression(&mut self, limit: u8, exp: &mut ExpDesc) -> Result<Option<BinOpr>> {
+    fn subexpression(&mut self, limit: u8, exp: &mut ExpDesc) -> GResult<Option<BinOpr>> {
         //self.enterlevel(); // incre recursive calls to prevent stack overflow ?
         if let Some(uop) = UnOpr::try_from(&self.ls.current()) {
             /* prefix (unary) operator? */
-            self.ls.next(); /* skip operator */
+            self.ls.next()?; /* skip operator */
             self.subexpression(uop.priority(), exp)?;
+            println!("subexpression={:?}", exp);
             self.apply_uop(uop, exp)?;
         } else {
-            self.simpleexp(exp);
+            self.simpleexp(exp)?;
         }
         /* expand while operators have priorities higher than 'limit' */
-        println!("current: {:?}", self.ls.current());
         let mut opt = BinOpr::try_from(&self.ls.current());
-        println!("binop: {:?}", opt);
         while opt.is_some() {
             let op = opt.take().unwrap();
             if op.left_priority() <= limit {
                 break;
             }
-            println!("binop: {:?}", op);
-            self.ls.next(); /* skip operator */
+            self.ls.next()?; /* skip operator */
             /* read sub-expression with higher priority */
             let mut right_exp = ExpDesc::new();
             opt = self.subexpression(op.right_priority(), &mut right_exp)?;
@@ -377,54 +374,36 @@ impl Parser {
         op: BinOpr,
         left_exp: &mut ExpDesc,
         right_exp: ExpDesc,
-    ) -> Result<()> {
+    ) -> GResult<()> {
         return Ok(());
     }
 
-    fn apply_uop(&mut self, op: UnOpr, exp: &mut ExpDesc) -> Result<()> {
-        return match op {
-            UnOpr::Minus => match exp.literal_value {
-                Some(Value::Int(i)) => {
-                    exp.literal_value = Some(Value::Int(-i));
-                    Ok(())
-                }
-                Some(Value::Number(n)) => {
-                    exp.literal_value = Some(Value::Number(-n));
-                    Ok(())
-                }
-                _ => Err(Error::semantic(
-                    self.ls.linenumber(),
-                    "<number>".to_owned(),
-                    self.ls.current().to_string(),
-                )),
-            },
-            UnOpr::Not => match exp.literal_value {
-                Some(Value::Bool(b)) => {
-                    exp.literal_value = Some(Value::Bool(!b));
-                    Ok(())
-                }
-                _ => Err(Error::semantic(
-                    self.ls.linenumber(),
-                    "<number>".to_owned(),
-                    self.ls.current().to_string(),
-                )),
-            },
-        };
+    fn apply_uop(&self, op: UnOpr, exp: &mut ExpDesc) -> GResult<()> {
+        if let Some(value) = &exp.literal_value {
+            exp.literal_value = op.apply(&value);
+        } else {
+            return Err(Error::semantic(
+                self.ls.linenumber(),
+                "value".to_owned(),
+                "not a literal value".to_owned(),
+            ));
+        }
+        return Ok(());
     }
 
     /* simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... | constructor | FUNCTION body | suffixedexp */
-    fn simpleexp(&mut self, exp: &mut ExpDesc) {
+    fn simpleexp(&mut self, exp: &mut ExpDesc) -> GResult<()> {
         use ExpKind::*;
         match self.ls.current() {
             Token::Flt(literal) => exp.init(ConstFlt, Value::try_from(literal)),
             Token::Int(literal) => exp.init(ConstInt, Value::try_from(literal)),
             Token::Nil => exp.init(Nil, None),
-            Token::True => exp.init(True, None),
-            Token::False => exp.init(False, None),
+            Token::True => exp.init(Bool, Some(Value::Bool(true))),
+            Token::False => exp.init(Bool, Some(Value::Bool(false))),
             Token::Name(name) => exp.init_var(name),
             _ => {}
         }
-        self.ls.next();
+        return self.ls.next();
     }
 
     /* stat -> func | assignment */
@@ -445,7 +424,7 @@ impl Parser {
     }
 
     /* ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END */
-    fn ifstat(&mut self) -> Result<()> {
+    fn ifstat(&mut self) -> GResult<()> {
         //let escapelist = NO_JUMP;  /* exit list for finished parts */
         self.test_then_block()?; /* IF cond THEN block */
         while self.ls.current() == Token::ElseIf {
@@ -460,7 +439,7 @@ impl Parser {
     }
 
     /* test_then_block -> [IF | ELSEIF] cond THEN block */
-    fn test_then_block(&mut self) -> Result<()> {
+    fn test_then_block(&mut self) -> GResult<()> {
         //expdesc v;
         //int jf;  /* instruction to skip 'then' code (if condition is false) */
         self.ls.next(); /* skip IF or ELSEIF */
@@ -497,7 +476,7 @@ impl Parser {
         return Ok(());
     }
 
-    fn expect_next(&mut self, t: Token) -> Result<()> {
+    fn expect_next(&mut self, t: Token) -> GResult<()> {
         if !self.ls.next_if_token(t.clone()) {
             return Err(Error::syntactical(
                 self.ls.linenumber(),
@@ -508,7 +487,7 @@ impl Parser {
         return Ok(());
     }
 
-    fn block(&mut self) -> Result<()> {
+    fn block(&mut self) -> GResult<()> {
         /* block -> statlist */
         //FuncState *fs = ls->fs;
         //BlockCnt bl;

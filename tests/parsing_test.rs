@@ -1,16 +1,18 @@
+use groenlang::error::GResult;
 use groenlang::parser::Parser;
 
 #[test]
-fn eval_var_decl() {
+fn eval_var_decl() -> GResult<()> {
     let var_decl = String::from(
         "
     let a = 0
     let b = -1
     let c = a
+    let d = true
+    let e = !true
     ",
     );
-    let res = Parser::eval(var_decl);
-    assert!(res.is_ok());
+    return Parser::eval(var_decl);
 }
 
 #[test]

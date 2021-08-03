@@ -1,3 +1,4 @@
+use crate::error::{Error, GResult};
 use crate::zio::Zio;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,16 +65,6 @@ impl Token {
             ("true", True),
             ("until", Until),
             ("while", While),
-            ("//", Idiv),
-            ("..", Concat),
-            ("...", Dots),
-            ("==", Eq),
-            (">=", Ge),
-            ("<=", Le),
-            ("~=", Ne),
-            ("<<", Shl),
-            (">>", Shr),
-            ("::", Dbcolon),
         ];
         for (k, v) in KEYWORDS {
             if *k == candidate {
@@ -130,101 +121,111 @@ impl LexState {
         return self.token.clone();
     }
 
-    pub fn next(&mut self) {
+    pub fn next(&mut self) -> GResult<()> {
         self.lastline = self.linenumber;
         if let Some(t) = self.lookahead.take() {
             /* discharge it if any */
             /* is there a look-ahead token? */
             self.token = t; /* use this one */
         } else {
-            self.token = self.lex() /* read next token */
+            self.token = self.lex()?; /* read next token */
         }
+        return Ok(());
     }
 
-    fn lex(&mut self) -> Token {
+    fn lex(&mut self) -> GResult<Token> {
         use Token::*;
         //luaZ_resetbuffer(ls->buff);
         loop {
             match self.current {
                 '\n' | '\r' => {
                     if !self.increment_line_number() {
-                        return Eos;
+                        return Ok(Eos);
                     }
                 }
                 ' ' | '\t' => {
                     if !self.next_char() {
-                        return Eos;
+                        return Ok(Eos);
                     }
                 } /* spaces */
                 '-' => {
                     if self.next_char() {
-                        return Char('-');
+                        return Ok(Char('-'));
                     } else {
-                        //TODO error
-                        return Char('-');
+                        return Err(Error::lexical(
+                            self.linenumber,
+                            "anything".to_owned(),
+                            "eof".to_owned(),
+                        ));
                     }
                 } //TODO: comment ?
-                '[' => return Char('['), //TODO: long string ?
+                '[' => return Ok(Char('[')), //TODO: long string ?
                 '=' => {
                     if self.next_char() && matches!(self.current, '=') {
-                        return Eq;
+                        return Ok(Eq);
                     } /* '==' */
-                    return Char('=');
+                    return Ok(Char('='));
                 }
                 '<' => {
                     self.next_char();
                     if matches!(self.current, '=') {
-                        return Le;
+                        return Ok(Le);
                     } /* '<=' */
                     if matches!(self.current, '<') {
-                        return Shl;
+                        return Ok(Shl);
                     } /* '<<' */
-                    return Char('<');
+                    return Ok(Char('<'));
                 }
                 '>' => {
                     self.next_char();
                     if matches!(self.current, '=') {
-                        return Ge;
+                        return Ok(Ge);
                     } /* '>=' */
                     if matches!(self.current, '>') {
-                        return Shr;
+                        return Ok(Shr);
                     } /* '>>' */
-                    return Char('>');
+                    return Ok(Char('>'));
                 }
                 '/' => {
                     self.next_char();
                     if matches!(self.current, '/') {
-                        return Idiv;
+                        return Ok(Idiv);
                     } /* '//' */
-                    return Char('/');
+                    return Ok(Char('/'));
                 }
-                '~' => {
+                '!' => {
                     //TODO use ! instead ?
-                    self.next_char();
-                    if matches!(self.current, '=') {
-                        return Ne;
-                    } /* '~=' */
-                    return Char('~');
+                    if !self.next_char() {
+                        return Err(Error::lexical(
+                            self.linenumber,
+                            "anything".to_owned(),
+                            "eof".to_owned(),
+                        ));
+                    }
+                    if self.current == '=' {
+                        return Ok(Ne);
+                    } /* '!=' */
+                    return Ok(Char('!'));
                 }
                 ':' => {
                     self.next_char();
                     if matches!(self.current, '=') {
-                        return Dbcolon;
+                        return Ok(Dbcolon);
                     } /* '::' */
-                    return Char(':');
+                    return Ok(Char(':'));
                 }
                 '\"' | '\'' => {
                     /* short literal strings */
                     //self.read_string()
-                    return Sring;
+                    return Ok(Sring);
                 }
                 '.' => {
                     /* '.', '..', '...', or number */
                     //TODO
-                    return Dots;
+                    return Ok(Dots);
                 }
                 '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => {
-                    return self.read_numeral()
+                    return Ok(self.read_numeral());
                 }
                 _ => {
                     if self.current.is_alphabetic() {
@@ -239,15 +240,15 @@ impl LexState {
                         let keyword = Token::try_keyword(&name);
                         if let Some(t) = keyword {
                             /* reserved word? */
-                            return t.clone();
+                            return Ok(t.clone());
                         } else {
-                            return Name(name);
+                            return Ok(Name(name));
                         }
                     }
                     /* single-char tokens ('+', '*', '%', '{', '}', ...) */
                     let t = Char(self.current);
                     self.next_char();
-                    return t;
+                    return Ok(t);
                 }
             }
         }
@@ -271,16 +272,6 @@ impl LexState {
             }
         }
         return Token::Int(number_str.to_owned());
-    }
-
-    fn next_is_one_of(&mut self, pat: &str) -> bool {
-        for c in pat.chars() {
-            if self.current == c {
-                self.save_and_next();
-                return true;
-            }
-        }
-        return false;
     }
 
     fn save(&mut self, c: char) {

@@ -1,4 +1,4 @@
-pub type Result<T> = std::result::Result<T, Error>;
+pub type GResult<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum ErrorType {
@@ -26,6 +26,15 @@ impl Error {
     }
 
     pub fn semantic(l: usize, e: String, c: String) -> Error {
+        return Error {
+            etype: ErrorType::Semantic(),
+            line: l,
+            expected_token: e,
+            current_token: c,
+        };
+    }
+
+    pub fn lexical(l: usize, e: String, c: String) -> Error {
         return Error {
             etype: ErrorType::Semantic(),
             line: l,
