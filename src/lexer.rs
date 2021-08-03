@@ -150,7 +150,14 @@ impl LexState {
                         return Eos;
                     }
                 } /* spaces */
-                '-' => return Char('-'), //TODO: comment ?
+                '-' => {
+                    if self.next_char() {
+                        return Char('-');
+                    } else {
+                        //TODO error
+                        return Char('-');
+                    }
+                } //TODO: comment ?
                 '[' => return Char('['), //TODO: long string ?
                 '=' => {
                     if self.next_char() && matches!(self.current, '=') {

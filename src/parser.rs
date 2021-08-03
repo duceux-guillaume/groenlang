@@ -2,19 +2,17 @@ use crate::code::{BinOpr, UnOpr};
 use crate::lexer::{LexState, Token};
 use crate::object::Value;
 
-const UNARY_PRIORITY: u8 = 12; /* priority for unary operators */
-
-type ParserResult<T> = std::result::Result<T, SyntaxError>;
+type ParserResult<T> = std::result::Result<T, ParsingError>;
 #[derive(Debug, Clone)]
-pub struct SyntaxError {
+pub struct ParsingError {
     line: usize,
     expected_token: Token,
     current_token: Token,
 }
 
-impl SyntaxError {
-    fn new(l: usize, e: Token, c: Token) -> SyntaxError {
-        return SyntaxError {
+impl ParsingError {
+    fn new(l: usize, e: Token, c: Token) -> ParsingError {
+        return ParsingError {
             line: l,
             expected_token: e,
             current_token: c,
@@ -121,7 +119,7 @@ impl ExpDesc {
             True => Some(Value::Bool(true)),
             Nil => Some(Value::Nil()),
             Const => None,
-            ConstInt | ConstFlt | ConstStr => self.const_value.clone(),
+            ConstInt | ConstFlt | ConstStr => self.literal_value.clone(),
             _ => return None,
         };
     }
@@ -251,7 +249,7 @@ impl FuncState {
 
     fn goiftrue(&mut self, exp: &ExpDesc) {
         self.dischargevars(exp);
-        match &exp.const_value {
+        match &exp.literal_value {
             VJmp => {
                 /* condition? */
                 self.negatecondition(exp); /* jump when it is false */
@@ -450,7 +448,7 @@ impl Parser {
         if let Token::Name(name) = self.ls.current() {
             self.fs.register(VarDesc::new(name, VarKind::Regular));
         } else {
-            return Err(SyntaxError::new(
+            return Err(ParsingError::new(
                 self.ls.linenumber(),
                 Token::Name("<name>".to_owned()),
                 self.ls.current(),
@@ -481,14 +479,13 @@ impl Parser {
      ** subexpression -> (simpleexp | unop subexpression) { binop subexpression }
      ** where 'binop' is any binary operator with a priority higher than 'limit'
      */
-    fn subexpression(&mut self, limit: u8, exp: &mut ExpDesc) -> Option<BinOpr> {
+    fn subexpression(&mut self, limit: u8, exp: &mut ExpDesc) -> ParserResult<Option<BinOpr>> {
         //self.enterlevel(); // incre recursive calls to prevent stack overflow ?
         if let Some(uop) = UnOpr::try_from(&self.ls.current()) {
             /* prefix (unary) operator? */
-            //  int line = ls->linenumber;
             self.ls.next(); /* skip operator */
-            self.subexpression(UNARY_PRIORITY, exp);
-            self.apply_uop(uop, exp);
+            self.subexpression(uop.priority(), exp)?;
+            self.apply_uop(uop, exp)?;
         } else {
             self.simpleexp(exp);
         }
@@ -505,21 +502,39 @@ impl Parser {
             self.ls.next(); /* skip operator */
             /* read sub-expression with higher priority */
             let mut right_exp = ExpDesc::new();
-            opt = self.subexpression(op.right_priority(), &mut right_exp);
+            opt = self.subexpression(op.right_priority(), &mut right_exp)?;
             /* Apply the operator */
-            self.apply_binop(op, &mut exp, right_exp);
+            self.apply_binop(op, exp, right_exp);
         }
-        panic!();
         //leavelevel(ls);
-        return opt; /* return first untreated operator */
+        return Ok(opt); /* return first untreated operator */
     }
 
-    fn apply_binop(op: BinOpr, left_exp: &mut ExpDesc, right_exp: ExpDesc) -> ParserResult<()> {
+    fn apply_binop(
+        &mut self,
+        op: BinOpr,
+        left_exp: &mut ExpDesc,
+        right_exp: ExpDesc,
+    ) -> ParserResult<()> {
         return Ok(());
     }
 
     fn apply_uop(&mut self, op: UnOpr, exp: &mut ExpDesc) -> ParserResult<()> {
-        if (exp)
+        return match exp.literal_value {
+            Some(Value::Int(i)) => {
+                exp.literal_value = Some(Value::Int(-i));
+                Ok(())
+            }
+            Some(Value::Number(n)) => {
+                exp.literal_value = Some(Value::Number(-n));
+                Ok(())
+            }
+            _ => Err(ParsingError::new(
+                self.ls.linenumber(),
+                self.ls.current(),
+                self.ls.current(),
+            )),
+        };
     }
 
     /* simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... | constructor | FUNCTION body | suffixedexp */
@@ -632,14 +647,22 @@ impl Parser {
 
     fn expect_next(&mut self, t: Token) -> ParserResult<()> {
         if !self.ls.next_if_token(t.clone()) {
-            return Err(SyntaxError::new(self.ls.linenumber(), t, self.ls.current()));
+            return Err(ParsingError::new(
+                self.ls.linenumber(),
+                t,
+                self.ls.current(),
+            ));
         }
         return Ok(());
     }
 
     fn expect_current(&mut self, t: Token) -> ParserResult<()> {
         if std::mem::discriminant(&self.ls.current()) != std::mem::discriminant(&t) {
-            return Err(SyntaxError::new(self.ls.linenumber(), t, self.ls.current()));
+            return Err(ParsingError::new(
+                self.ls.linenumber(),
+                t,
+                self.ls.current(),
+            ));
         }
         return Ok(());
     }

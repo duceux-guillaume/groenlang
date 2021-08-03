@@ -108,6 +108,7 @@ impl BinOpr {
     }
 }
 
+#[derive(Debug)]
 pub enum UnOpr {
     Minus,
     Not,
@@ -136,5 +137,9 @@ impl UnOpr {
                 _ => None,
             },
         };
+    }
+
+    pub fn priority(&self) -> u8 {
+        return 12;
     }
 }
