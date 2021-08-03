@@ -1,32 +1,34 @@
 use crate::lexer::Token;
+use crate::object::Value;
 
+#[derive(Debug)]
 pub enum BinOpr {
     /* arithmetic operators */
-    BoAdd,
-    BoSub,
-    BoMul,
-    BoMod,
-    BoPow,
-    BoDiv,
-    BoIDiv,
+    Add,
+    Sub,
+    Mul,
+    Mod,
+    Pow,
+    Div,
+    IDiv,
     /* bitwise operators */
-    BoBand,
-    BoBor,
-    BoBXor,
-    BoShL,
-    BoShR,
+    Band,
+    Bor,
+    BXor,
+    ShL,
+    ShR,
     /* string operator */
-    BoConcat,
+    Concat,
     /* comparison operators */
-    BoEq,
-    BoLT,
-    BoLE,
-    BoNE,
-    BoGT,
-    BoGE,
+    Eq,
+    LT,
+    LE,
+    NE,
+    GT,
+    GE,
     /* logical operators */
-    BoAnd,
-    BoOr,
+    And,
+    Or,
 }
 
 impl BinOpr {
@@ -34,27 +36,27 @@ impl BinOpr {
         use BinOpr::*;
         use Token::*;
         return match candidate {
-            Char('+') => Some(BoAdd),
-            Char('-') => Some(BoSub),
-            Char('*') => Some(BoMul),
-            Char('%') => Some(BoMod),
-            Char('^') => Some(BoPow),
-            Char('/') => Some(BoDiv),
-            Idiv => Some(BoIDiv),
-            Char('&') => Some(BoBand),
-            Char('|') => Some(BoBor),
-            Char('~') => Some(BoBXor),
-            Shl => Some(BoShL),
-            Shr => Some(BoShR),
-            Concat => Some(BoConcat),
-            Ne => Some(BoNE),
-            Eq => Some(BoEq),
-            Char('<') => Some(BoLT),
-            Le => Some(BoLE),
-            Char('>') => Some(BoGT),
-            Ge => Some(BoGE),
-            And => Some(BoAnd),
-            Or => Some(BoOr),
+            Char('+') => Some(Add),
+            Char('-') => Some(Sub),
+            Char('*') => Some(Mul),
+            Char('%') => Some(Mod),
+            Char('^') => Some(Pow),
+            Char('/') => Some(Div),
+            Idiv => Some(IDiv),
+            Char('&') => Some(Band),
+            Char('|') => Some(Bor),
+            Char('~') => Some(BXor),
+            Shl => Some(ShL),
+            Shr => Some(ShR),
+            Token::Concat => Some(BinOpr::Concat),
+            Ne => Some(NE),
+            Token::Eq => Some(BinOpr::Eq),
+            Char('<') => Some(LT),
+            Le => Some(LE),
+            Char('>') => Some(GT),
+            Ge => Some(GE),
+            Token::And => Some(BinOpr::And),
+            Token::Or => Some(BinOpr::Or),
             _ => None,
         };
     }
@@ -63,43 +65,76 @@ impl BinOpr {
         use BinOpr::*;
         return match &self {
             /* arithmetic operators */
-            BoAdd | BoSub => 10,
-            BoMul | BoMod => 11,
-            BoPow => 14,
-            BoDiv | BoIDiv => 11,
+            Add | Sub => 10,
+            Mul | Mod => 11,
+            Pow => 14,
+            Div | IDiv => 11,
             /* bitwise operators */
-            BoBand => 6,
-            BoBor => 4,
-            BoBXor => 5,
-            BoShL | BoShR => 7,
+            Band => 6,
+            Bor => 4,
+            BXor => 5,
+            ShL | ShR => 7,
             /* string operator */
-            BoConcat => 9,
+            Concat => 9,
             /* comparison operators */
-            BoEq | BoLT | BoLE | BoNE | BoGT | BoGE => 3,
+            Eq | LT | LE | NE | GT | GE => 3,
             /* logical operators */
-            BoAnd => 2,
-            BoOr => 1,
+            And => 2,
+            Or => 1,
+        };
+    }
+
+    pub fn right_priority(&self) -> u8 {
+        use BinOpr::*;
+        return match &self {
+            /* arithmetic operators */
+            Add | Sub => 10,
+            Mul | Mod => 11,
+            Pow => 13,
+            Div | IDiv => 11,
+            /* bitwise operators */
+            Band => 6,
+            Bor => 4,
+            BXor => 5,
+            ShL | ShR => 7,
+            /* string operator */
+            Concat => 8,
+            /* comparison operators */
+            Eq | LT | LE | NE | GT | GE => 3,
+            /* logical operators */
+            And => 2,
+            Or => 1,
         };
     }
 }
 
 pub enum UnOpr {
-    UoMinus,
-    UoBNot,
-    UoNot,
-    UoLen,
+    Minus,
+    Not,
 }
 
 impl UnOpr {
     pub fn try_from(candidate: &Token) -> Option<Self> {
-        use Token::*;
-        use UnOpr::*;
         return match candidate {
-            Char('-') => Some(UoMinus),
-            Char('~') => Some(UoBNot),
-            Char('#') => Some(UoLen),
-            Not => Some(UoNot),
+            Token::Char('-') => Some(UnOpr::Minus),
+            Token::Char('!') => Some(UnOpr::Not),
             _ => None,
+        };
+    }
+
+    pub fn apply(self, v: &Value) -> Option<Value> {
+        use UnOpr::*;
+        use Value::*;
+        return match self {
+            Minus => match v {
+                Int(i) => Some(Int(-i)),
+                Number(f) => Some(Number(-f)),
+                _ => None,
+            },
+            Not => match v {
+                Bool(b) => Some(Bool(!b)),
+                _ => None,
+            },
         };
     }
 }

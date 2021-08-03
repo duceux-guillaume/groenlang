@@ -34,73 +34,73 @@ impl SyntaxError {
 /* kinds of variables/expressions */
 #[derive(Debug, PartialEq)]
 enum ExpKind {
-    VVoid,  /* when 'expdesc' describes the last expression of a list,
-            this kind means an empty list (so, no expression) */
-    VNil,   /* constant nil */
-    VTrue,  /* constant true */
-    VFalse, /* constant false */
-    VKk,    /* constant in 'k'; info = index of constant in 'k' */
-    VKFlt,  /* floating constant; nval = numerical float value */
-    VKInt,  /* integer constant; ival = numerical integer value */
-    VKStr,  /* string constant; strval = TString address;
-            (string is fixed by the lexer) */
-    VNonReloc, /* expression has its value in a fixed register;
-               info = result register */
-    VLocal, /* local variable; var.ridx = register index;
-            var.vidx = relative index in 'actvar.arr'  */
-    VUpVal, /* upvalue variable; info = index of upvalue in 'upvalues' */
-    VConst, /* compile-time <const> variable;
-            info = absolute index in 'actvar.arr'  */
-    VIndexed, /* indexed variable;
-              ind.t = table register;
-              ind.idx = key's R index */
-    VIndexUp, /* indexed upvalue;
-              ind.t = table upvalue;
-              ind.idx = key's K index */
-    VIndexI, /* indexed variable with constant integer;
+    Void,     /* when 'expdesc' describes the last expression of a list,
+              this kind means an empty list (so, no expression) */
+    Nil,      /* constant nil */
+    True,     /* constant true */
+    False,    /* constant false */
+    ConstK,   /* constant in 'k'; info = index of constant in 'k' */
+    ConstFlt, /* floating constant; nval = numerical float value */
+    ConstInt, /* integer constant; ival = numerical integer value */
+    ConstStr, /* string constant; strval = TString address;
+              (string is fixed by the lexer) */
+    NonReloc, /* expression has its value in a fixed register;
+              info = result register */
+    Local, /* local variable; var.ridx = register index;
+           var.vidx = relative index in 'actvar.arr'  */
+    UpVal, /* upvalue variable; info = index of upvalue in 'upvalues' */
+    Const, /* compile-time <const> variable;
+           info = absolute index in 'actvar.arr'  */
+    Indexed, /* indexed variable;
              ind.t = table register;
-             ind.idx = key's value */
-    VIndexStr, /* indexed variable with literal string;
-               ind.t = table register;
-               ind.idx = key's K index */
-    VJmp, /* expression is a test/comparison;
+             ind.idx = key's R index */
+    IndexUp, /* indexed upvalue;
+             ind.t = table upvalue;
+             ind.idx = key's K index */
+    IndexI, /* indexed variable with constant integer;
+            ind.t = table register;
+            ind.idx = key's value */
+    IndexStr, /* indexed variable with literal string;
+              ind.t = table register;
+              ind.idx = key's K index */
+    Jump, /* expression is a test/comparison;
           info = pc of corresponding jump instruction */
-    VReloc,  /* expression can put result in any register;
-             info = instruction pc */
-    VCall,   /* expression is a function call; info = instruction pc */
-    VVararg, /* vararg expression; info = instruction pc */
+    Reloc,  /* expression can put result in any register;
+            info = instruction pc */
+    Call,   /* expression is a function call; info = instruction pc */
+    Vararg, /* vararg expression; info = instruction pc */
 }
 
 /* expressions description */
 #[derive(Debug)]
 struct ExpDesc {
-    const_value: Option<Value>, /* value when a const expression */
+    literal_value: Option<Value>, /* value when a literal expression */
     kind: ExpKind,
 }
 
 impl ExpDesc {
     fn new() -> ExpDesc {
         return ExpDesc {
-            const_value: None,
-            kind: ExpKind::VVoid,
+            literal_value: None,
+            kind: ExpKind::Void,
         };
     }
 
     fn init(&mut self, k: ExpKind, v: Option<Value>) {
         self.kind = k;
-        self.const_value = v;
+        self.literal_value = v;
     }
 
     fn has_multiple_return(&self) -> bool {
         use ExpKind::*;
         return match self.kind {
-            VCall | VVararg => true,
+            Call | Vararg => true,
             _ => false,
         };
     }
 
     fn is_void(&self) -> bool {
-        return self.kind == ExpKind::VVoid;
+        return self.kind == ExpKind::Void;
     }
 
     fn has_jumps(&self) -> bool {
@@ -117,11 +117,11 @@ impl ExpDesc {
         }
         use ExpKind::*;
         return match self.kind {
-            VFalse => Some(Value::Bool(false)),
-            VTrue => Some(Value::Bool(true)),
-            VNil => Some(Value::Nil()),
-            VConst => None,
-            VKInt | VKFlt | VKStr => self.const_value.clone(),
+            False => Some(Value::Bool(false)),
+            True => Some(Value::Bool(true)),
+            Nil => Some(Value::Nil()),
+            Const => None,
+            ConstInt | ConstFlt | ConstStr => self.const_value.clone(),
             _ => return None,
         };
     }
@@ -136,7 +136,7 @@ impl ExpDesc {
 //close: i32,   /* goto that escapes upvalues */
 //}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum VarKind {
     Regular = 0,
     Const = 1,
@@ -144,7 +144,7 @@ enum VarKind {
     CompileTimeConstant = 3,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct VarDesc {
     value: Value,
     name: String, /* variable name */
@@ -178,34 +178,47 @@ impl VarDesc {
 /*
 ** nodes for block list (list of active blocks)
 */
-//struct BlockCnt {}
+struct Block {
+    isloop: bool,
+    actvar: Vec<VarDesc>,
+}
+
+impl Block {
+    fn isloop(&self) -> bool {
+        return self.isloop;
+    }
+}
 
 /* state needed to generate code for a given function */
 pub struct FuncState {
     actvar: Vec<VarDesc>, /* active local variables */
-                          //f: Weak<Proto>,        /* current function header */
-                          //prev: Weak<FuncState>, /* enclosing function */
-                          //ls: Weak<LexState>,    /* lexical state */
-                          //bl: Weak<BlockCnt>,    /* chain of current blocks */
-                          //pc: i32,               /* next position to code (equivalent to 'ncode') */
-                          //lasttarget: i32,       /* 'label' of last 'jump label' */
-                          //previousline: i32,     /* last line that was saved in 'lineinfo' */
-                          //nk: i32,               /* number of elements in 'k' */
-                          //np: i32,               /* number of elements in 'p' */
-                          //nabslineinfo: i32,     /* number of elements in 'abslineinfo' */
-                          //firstlocal: i32,       /* index of first local var (in Dyndata array) */
-                          //firstlabel: i32,       /* index of first label (in 'dyd->label->arr') */
-                          //ndebugvars: i16,       /* number of elements in 'f->locvars' */
-                          //nactvar: u8,           /* number of active local variables */
-                          //nups: u8,              /* number of upvalues */
-                          //freereg: u8,           /* first free register */
-                          //iwthabs: u8,           /* instructions issued since last absolute line info */
-                          //needclose: u8,         /* function needs to close upvalues when returning */
+    blocks: Vec<Block>,
+    //f: Weak<Proto>,        /* current function header */
+    //prev: Weak<FuncState>, /* enclosing function */
+    //ls: Weak<LexState>,    /* lexical state */
+    //bl: Weak<BlockCnt>,    /* chain of current blocks */
+    //pc: i32,               /* next position to code (equivalent to 'ncode') */
+    //lasttarget: i32,       /* 'label' of last 'jump label' */
+    //previousline: i32,     /* last line that was saved in 'lineinfo' */
+    //nk: i32,               /* number of elements in 'k' */
+    //np: i32,               /* number of elements in 'p' */
+    //nabslineinfo: i32,     /* number of elements in 'abslineinfo' */
+    //firstlocal: i32,       /* index of first local var (in Dyndata array) */
+    //firstlabel: i32,       /* index of first label (in 'dyd->label->arr') */
+    //ndebugvars: i16,       /* number of elements in 'f->locvars' */
+    //nactvar: u8,           /* number of active local variables */
+    //nups: u8,              /* number of upvalues */
+    //freereg: u8,           /* first free register */
+    //iwthabs: u8,           /* instructions issued since last absolute line info */
+    //needclose: u8,         /* function needs to close upvalues when returning */
 }
 
 impl FuncState {
     fn new() -> FuncState {
-        return FuncState { actvar: vec![] };
+        return FuncState {
+            actvar: vec![],
+            blocks: vec![],
+        };
     }
 
     fn register(&mut self, mut v: VarDesc) {
@@ -252,6 +265,47 @@ impl FuncState {
     fn dischargevars(&mut self, exp: &ExpDesc) {}
 
     fn negatecondition(&mut self, exp: &ExpDesc) {}
+
+    fn enter_block(&mut self, isloop: bool) {
+        let bl = Block {
+            isloop: isloop,
+            actvar: self.actvar.clone(),
+        };
+        //bl->firstlabel = fs->ls->dyd->label.n;
+        //bl->firstgoto = fs->ls->dyd->gt.n;
+        //bl->upval = 0;
+        //bl->insidetbc = (fs->bl != NULL && fs->bl->insidetbc);
+        //bl->previous = fs->bl;
+        self.blocks.push(bl);
+        //lua_assert(fs->freereg == luaY_nvarstack(fs));
+    }
+
+    fn leave_block(&mut self) {
+        let hasblock = self.blocks.pop();
+        if hasblock.is_none() {
+            return;
+        }
+        let bl = hasblock.unwrap();
+        let hasclose = false;
+        //int stklevel = reglevel(fs, bl->nactvar);  /* level outside the block */
+        if bl.isloop() { /* fix pending breaks? */
+            //hasclose = createlabel(ls, luaS_newliteral(ls->L, "break"), 0, 0);
+        }
+        //if (!hasclose && bl->previous && bl->upval) {
+        //  luaK_codeABC(fs, OP_CLOSE, stklevel, 0, 0);
+        //}
+        //removevars(fs, bl->nactvar);
+        //lua_assert(bl->nactvar == fs->nactvar);
+        //fs->freereg = stklevel;  /* free registers */
+        //ls->dyd->label.n = bl->firstlabel;  /* remove local labels */
+        //if (bl->previous) { /* inner block? */
+        //  movegotosout(fs, bl);  /* update pending gotos to outer block */
+        //}
+        //else {
+        //  if (bl->firstgoto < ls->dyd->gt.n)  /* pending gotos in outer block? */
+        //    undefgoto(ls, &ls->dyd->gt.arr[bl->firstgoto]);  /* error */
+        //}
+    }
 }
 
 pub struct Parser {
@@ -263,6 +317,7 @@ impl Parser {
     pub fn eval(s: String) -> ParserResult<()> {
         let mut p = Parser::new(s);
         p.ls.next();
+        println!("eval: {:?}", p.ls.current());
         return p.statlist();
     }
 
@@ -282,6 +337,7 @@ impl Parser {
             }
             self.statement()?;
         }
+        println!("statlist => {:?}", self.ls.current());
         return Ok(());
     }
 
@@ -295,7 +351,6 @@ impl Parser {
         return match self.ls.current() {
             Else => true,
             ElseIf => true,
-            End => true,
             Eos => true,
             Until => withuntil,
             _ => false,
@@ -304,6 +359,7 @@ impl Parser {
 
     fn statement(&mut self) -> ParserResult<()> {
         use Token::*;
+        println!("statement => {:?}", self.ls.current());
         //int line = ls->linenumber;  /* may be needed for error messages */
         //enterlevel(ls); /* increment stack */
         match self.ls.current() {
@@ -376,11 +432,13 @@ impl Parser {
         self.new_localvar()?;
         let mut exp = ExpDesc::new();
         self.expect_next(Token::Char('='))?;
-        self.expr(&mut exp);
+        self.expression(&mut exp);
+        println!("let expr => {:?}", exp);
         let const_var = exp.try_into_value();
         if let Some(v) = const_var {
             let var = self.fs.last().unwrap();
             var.value = v;
+            println!("new var => {:?}", var);
         }
         return Ok(());
     }
@@ -403,64 +461,76 @@ impl Parser {
     }
 
     /* Parse list of expression, return the number of expression in the list */
-    /* explist -> expr { ',' expr } */
+    /* explist -> expression { ',' expression } */
     fn explist(&mut self, exp: &mut ExpDesc) -> u8 {
         let mut n = 1; /* at least one expression */
-        self.expr(exp);
+        self.expression(exp);
         while self.ls.next_if_char(',') {
             //luaK_exp2nextreg(ls->fs, v);
-            self.expr(exp);
+            self.expression(exp);
             n += 1;
         }
         return n;
     }
 
-    fn expr(&mut self, exp: &mut ExpDesc) {
-        self.subexpr(0, exp);
+    fn expression(&mut self, exp: &mut ExpDesc) {
+        self.subexpression(0, exp);
     }
 
     /*
-     ** subexpr -> (simpleexp | unop subexpr) { binop subexpr }
+     ** subexpression -> (simpleexp | unop subexpression) { binop subexpression }
      ** where 'binop' is any binary operator with a priority higher than 'limit'
      */
-    fn subexpr(&mut self, limit: u8, exp: &mut ExpDesc) -> Option<BinOpr> {
+    fn subexpression(&mut self, limit: u8, exp: &mut ExpDesc) -> Option<BinOpr> {
         //self.enterlevel(); // incre recursive calls to prevent stack overflow ?
         if let Some(uop) = UnOpr::try_from(&self.ls.current()) {
             /* prefix (unary) operator? */
             //  int line = ls->linenumber;
             self.ls.next(); /* skip operator */
-            self.subexpr(UNARY_PRIORITY, exp);
-        //  luaK_prefix(ls->fs, uop, v, line);
+            self.subexpression(UNARY_PRIORITY, exp);
+            self.apply_uop(uop, exp);
         } else {
             self.simpleexp(exp);
         }
         /* expand while operators have priorities higher than 'limit' */
-        let mut op = BinOpr::try_from(&self.ls.current());
-        while op.is_some() && op.take().unwrap().left_priority() > limit {
-            //  expdesc v2;
-            //  BinOpr nextop;
-            //  int line = ls->linenumber;
+        println!("current: {:?}", self.ls.current());
+        let mut opt = BinOpr::try_from(&self.ls.current());
+        println!("binop: {:?}", opt);
+        while opt.is_some() {
+            let op = opt.take().unwrap();
+            if op.left_priority() <= limit {
+                break;
+            }
+            println!("binop: {:?}", op);
             self.ls.next(); /* skip operator */
-            //  luaK_infix(ls->fs, op, v);
-            //  /* read sub-expression with higher priority */
-            //  nextop = subexpr(ls, &v2, priority[op].right);
-            //  luaK_posfix(ls->fs, op, v, &v2, line);
-            //  op = nextop;
+            /* read sub-expression with higher priority */
+            let mut right_exp = ExpDesc::new();
+            opt = self.subexpression(op.right_priority(), &mut right_exp);
+            /* Apply the operator */
+            self.apply_binop(op, &mut exp, right_exp);
         }
+        panic!();
         //leavelevel(ls);
-        return op; /* return first untreated operator */
+        return opt; /* return first untreated operator */
+    }
+
+    fn apply_binop(op: BinOpr, left_exp: &mut ExpDesc, right_exp: ExpDesc) -> ParserResult<()> {
+        return Ok(());
+    }
+
+    fn apply_uop(&mut self, op: UnOpr, exp: &mut ExpDesc) -> ParserResult<()> {
+        if (exp)
     }
 
     /* simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... | constructor | FUNCTION body | suffixedexp */
     fn simpleexp(&mut self, exp: &mut ExpDesc) {
         use ExpKind::*;
-        use Token::*;
         match self.ls.current() {
-            Flt(literal) => exp.init(VKFlt, Value::try_from(literal)),
-            Int(literal) => exp.init(VKInt, Value::try_from(literal)),
-            Nil => exp.init(VNil, None),
-            True => exp.init(VTrue, None),
-            False => exp.init(VFalse, None),
+            Token::Flt(literal) => exp.init(ConstFlt, Value::try_from(literal)),
+            Token::Int(literal) => exp.init(ConstInt, Value::try_from(literal)),
+            Token::Nil => exp.init(Nil, None),
+            Token::True => exp.init(True, None),
+            Token::False => exp.init(False, None),
             _ => {}
         }
         self.ls.next();
@@ -474,7 +544,7 @@ impl Parser {
             if extra < 0 {
                 extra = 0;
             }
-            //self.set_returns(); /* last exp. provides the difference */
+        //self.set_returns(); /* last exp. provides the difference */
         } else {
             if !exp.is_void() { /* at least one expression? */
                 //luaK_exp2nextreg(fs, e);  /* close last expression */
@@ -524,35 +594,35 @@ impl Parser {
 
     /* test_then_block -> [IF | ELSEIF] cond THEN block */
     fn test_then_block(&mut self) -> ParserResult<()> {
-        //BlockCnt bl;
-        //FuncState *fs = ls->fs;
         //expdesc v;
         //int jf;  /* instruction to skip 'then' code (if condition is false) */
         self.ls.next(); /* skip IF or ELSEIF */
         let mut cond_expr = ExpDesc::new();
-        self.expr(&mut cond_expr); /* read condition */
+        self.expression(&mut cond_expr); /* read condition */
         self.expect_next(Token::Char('{'))?;
         if self.ls.current() == Token::Break {
             /* 'if x then break' ? */
             //let line = self.ls.linenumber();
             //luaK_goiffalse(ls->fs, &v);  /* will jump if condition is true */
             self.ls.next(); /* skip 'break' */
-        //enterblock(fs, &bl, 0);  /* must enter block before 'goto' */
-        //newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
-        //while (testnext(ls, ';')) {}  /* skip semicolons */
-        //if (block_follow(ls, 0)) {  /* jump is the entire block? */
-        //leaveblock(fs);
-        //return;  /* and that is it */
-        //}
-        //else  /* must skip over 'then' part if condition is false */
-        //jf = luaK_jump(fs);
-        } else { /* regular case (not a break) */
+            self.fs.enter_block(false); /* must enter block before 'goto' */
+            //newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
+            while self.ls.next_if_char(';') {} /* skip semicolons */
+            if self.block_follow(false) {
+                /* jump is the entire block? */
+                self.fs.leave_block();
+                return Ok(()); /* and that is it */
+            } else { /* must skip over 'then' part if condition is false */
+                //jf = luaK_jump(fs);
+            }
+        } else {
+            /* regular case (not a break) */
             //luaK_goiftrue(ls->fs, &v);  /* skip over block if condition is false */
-            //enterblock(fs, &bl, 0);
+            self.fs.enter_block(false);
             //jf = v.f;
         }
         self.statlist(); /* 'then' part */
-        //leaveblock(fs);
+        self.fs.leave_block();
         if self.ls.current() == Token::Else || self.ls.current() == Token::ElseIf { /* followed by 'else'/'elseif'? */
             //luaK_concat(fs, escapelist, luaK_jump(fs));  /* must jump over it */
         }
