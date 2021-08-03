@@ -375,6 +375,15 @@ impl Parser {
         left_exp: &mut ExpDesc,
         right_exp: ExpDesc,
     ) -> GResult<()> {
+        if left_exp.literal_value.is_none() || right_exp.literal_value.is_none() {
+            return Err(Error::semantic(
+                self.ls.linenumber(),
+                "two litteral values".to_owned(),
+                "something else".to_owned(),
+            ));
+        }
+        let leftv = left_exp.literal_value.take().unwrap();
+        left_exp.literal_value = op.apply(&leftv, &right_exp.literal_value.unwrap());
         return Ok(());
     }
 
@@ -442,7 +451,7 @@ impl Parser {
     fn test_then_block(&mut self) -> GResult<()> {
         //expdesc v;
         //int jf;  /* instruction to skip 'then' code (if condition is false) */
-        self.ls.next(); /* skip IF or ELSEIF */
+        self.ls.next()?; /* skip IF or ELSEIF */
         let mut cond_expr = ExpDesc::new();
         self.expression(&mut cond_expr)?; /* read condition */
         self.expect_next(Token::Char('{'))?;
@@ -450,7 +459,7 @@ impl Parser {
             /* 'if x then break' ? */
             //let line = self.ls.linenumber();
             //luaK_goiffalse(ls->fs, &v);  /* will jump if condition is true */
-            self.ls.next(); /* skip 'break' */
+            self.ls.next()?; /* skip 'break' */
             self.fs.enter_block(); /* must enter block before 'goto' */
             //newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
             while self.ls.next_if_char(';') {} /* skip semicolons */

@@ -10,6 +10,7 @@ fn eval_var_decl() -> GResult<()> {
     let c = a
     let d = true
     let e = !true
+    let f = 5 + 6/2
     ",
     );
     return Parser::eval(var_decl);

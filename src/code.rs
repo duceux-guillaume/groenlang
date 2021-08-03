@@ -106,6 +106,25 @@ impl BinOpr {
             Or => 1,
         };
     }
+
+    pub fn apply(self, left: &Value, right: &Value) -> Option<Value> {
+        use BinOpr::*;
+        use Value::*;
+        return match (self, left, right) {
+            (Add, Int(l), Int(r)) => Some(Int(l + r)),
+            (Sub, Int(l), Int(r)) => Some(Int(l - r)),
+            (Mul, Int(l), Int(r)) => Some(Int(l * r)),
+            (Pow, Int(l), Int(r)) => Some(Int(l ^ r)),
+            (Mod, Int(l), Int(r)) => Some(Int(l % r)),
+            (Div, Int(l), Int(r)) => Some(Int(l / r)),
+            (Add, Number(l), Number(r)) => Some(Number(l + r)),
+            (Sub, Number(l), Number(r)) => Some(Number(l - r)),
+            (Mul, Number(l), Number(r)) => Some(Number(l * r)),
+            (Mod, Number(l), Number(r)) => Some(Number(l % r)),
+            (Div, Number(l), Number(r)) => Some(Number(l / r)),
+            (_, _, _) => None, //TODO: error
+        };
+    }
 }
 
 #[derive(Debug)]
