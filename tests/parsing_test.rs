@@ -12,8 +12,30 @@ fn eval_var_decl() -> GResult<()> {
     let e = !true
     let f = 5 + 6/2
     let g = (5 + 6)/2
-    fn add() {
-        return 1+1
+    if false {
+        let h = true
+    }
+    if false {
+        let i = false
+    } else {
+        let i = true
+    }
+    if false {
+        let k = false
+    } elseif true {
+        let k = true
+    }
+    if true {
+        let l = false
+    } elseif false {
+        let k = true
+    }
+    if false {
+        let l = false
+    } elseif false {
+        let k = true
+    } else {
+        let m = 100
     }
     ",
     );

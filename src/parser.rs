@@ -71,6 +71,14 @@ impl ExpDesc {
             _ => return None,
         };
     }
+
+    fn is_true(&self) -> bool {
+        return match (&self.kind, &self.literal_value) {
+            (ExpKind::Nil, _) => false,
+            (ExpKind::Bool, Some(Value::Bool(b))) => *b,
+            (_, _) => false,
+        };
+    }
 }
 
 /* description of pending goto statements and label statements */
@@ -196,30 +204,14 @@ impl Parser {
 
     fn statlist(&mut self) -> GResult<()> {
         /* statlist -> { stat [';'] } */
-        while !self.block_follow(true) {
-            if self.ls.current() == Token::Return {
-                /* 'return' must be last statement */
-                return self.statement();
+        loop {
+            match self.ls.current() {
+                Token::Return => return self.statement(),
+                Token::Char('}') => return Ok(()),
+                Token::Eos => return Ok(()),
+                _ => self.statement()?,
             }
-            self.statement()?;
         }
-        return Ok(());
-    }
-
-    /*
-     ** check whether current token is in the follow set of a block.
-     ** 'until' closes syntactical blocks, but do not close scope,
-     ** so it is handled in separate.
-     */
-    fn block_follow(&mut self, withuntil: bool) -> bool {
-        use Token::*;
-        return match self.ls.current() {
-            Else => true,
-            ElseIf => true,
-            Eos => true,
-            Until => withuntil,
-            _ => false,
-        };
     }
 
     fn statement(&mut self) -> GResult<()> {
@@ -493,56 +485,41 @@ impl Parser {
         //}
     }
 
-    /* ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END */
+    /* ifstat -> IF cond block {ELSEIF cond block} [ELSE block] */
     fn ifstat(&mut self) -> GResult<()> {
-        //let escapelist = NO_JUMP;  /* exit list for finished parts */
-        self.test_then_block()?; /* IF cond THEN block */
-        while self.ls.current() == Token::ElseIf {
-            self.test_then_block()?; /* ELSEIF cond THEN block */
-        }
-        if self.ls.next_if_token(Token::Else)? {
-            self.block()?; /* 'else' part */
-        }
-        self.expect_next(Token::Char('}'))?;
-        //luaK_patchtohere(fs, escapelist);  /* patch escape list to 'if' end */
-        return Ok(());
-    }
+        self.ls.check_next_is_token(Token::If)?;
 
-    /* test_then_block -> [IF | ELSEIF] cond THEN block */
-    fn test_then_block(&mut self) -> GResult<()> {
-        //expdesc v;
-        //int jf;  /* instruction to skip 'then' code (if condition is false) */
-        self.ls.next()?; /* skip IF or ELSEIF */
-        let mut cond_expr = ExpDesc::new();
-        self.expression(&mut cond_expr)?; /* read condition */
-        self.expect_next(Token::Char('{'))?;
-        if self.ls.current() == Token::Break {
-            /* 'if x then break' ? */
-            //let line = self.ls.linenumber();
-            //luaK_goiffalse(ls->fs, &v);  /* will jump if condition is true */
-            self.ls.next()?; /* skip 'break' */
-            self.fs.enter_block(); /* must enter block before 'goto' */
-            //newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
-            while self.ls.next_if_char(';')? {} /* skip semicolons */
-            if self.block_follow(false) {
-                /* jump is the entire block? */
-                self.fs.leave_block();
-                return Ok(()); /* and that is it */
-            } else { /* must skip over 'then' part if condition is false */
-                //jf = luaK_jump(fs);
-            }
+        // if statement
+        let mut exp = ExpDesc::new();
+        self.expression(&mut exp)?;
+        if exp.is_true() {
+            self.block()?;
         } else {
-            /* regular case (not a break) */
-            //luaK_goiftrue(ls->fs, &v);  /* skip over block if condition is false */
-            self.fs.enter_block();
-            //jf = v.f;
+            //skip block
+            while !matches!(self.ls.current(), Token::Char('}') | Token::Eos) {
+                self.ls.next()?;
+            }
+            self.ls.check_next_is_char('}')?;
         }
-        self.statlist()?; /* 'then' part */
-        self.fs.leave_block();
-        if self.ls.current() == Token::Else || self.ls.current() == Token::ElseIf { /* followed by 'else'/'elseif'? */
-            //luaK_concat(fs, escapelist, luaK_jump(fs));  /* must jump over it */
+
+        while self.ls.next_if_token(Token::ElseIf)? {
+            let mut cond = ExpDesc::new();
+            self.expression(&mut cond)?;
+            if cond.is_true() {
+                self.block()?;
+            } else {
+                //skip block
+                while !matches!(self.ls.current(), Token::Char('}') | Token::Eos) {
+                    self.ls.next()?;
+                }
+                self.ls.check_next_is_char('}')?;
+            }
         }
-        //luaK_patchtohere(fs, jf);
+
+        if self.ls.next_if_token(Token::Else)? {
+            self.block()?;
+        }
+
         return Ok(());
     }
 
