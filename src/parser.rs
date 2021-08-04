@@ -296,7 +296,6 @@ impl Parser {
         let mut exp = ExpDesc::new();
         self.expect_next(Token::Char('='))?;
         self.expression(&mut exp)?;
-        println!("let exp => {:?}", exp);
         if let Some(v) = exp.try_into_value() {
             self.fs.write(new_var_name.clone(), v.clone())?;
             println!("new var => {}={:?}", new_var_name, v);
@@ -346,7 +345,6 @@ impl Parser {
             /* prefix (unary) operator? */
             self.ls.next()?; /* skip operator */
             self.subexpression(uop.priority(), exp)?;
-            println!("subexpression={:?}", exp);
             self.apply_uop(uop, exp)?;
         } else {
             self.simpleexp(exp)?;
@@ -410,9 +408,45 @@ impl Parser {
             Token::True => exp.init(Bool, Some(Value::Bool(true))),
             Token::False => exp.init(Bool, Some(Value::Bool(false))),
             Token::Name(name) => exp.init_var(name),
-            _ => {}
+            _ => return self.suffixed_exp(exp),
         }
         return self.ls.next();
+    }
+
+    /* suffixedexp -> primaryexp { '.' NAME | '[' exp ']' | ':' NAME funcargs | funcargs } */
+    fn suffixed_exp(&mut self, exp: &mut ExpDesc) -> GResult<()> {
+        self.primary_exp(exp)?;
+        return Ok(());
+    }
+
+    /* primaryexp -> NAME | '(' expr ')' */
+    fn primary_exp(&mut self, exp: &mut ExpDesc) -> GResult<()> {
+        match self.ls.current() {
+            Token::Char('(') => {
+                self.ls.next()?;
+                self.expression(exp)?;
+                if !self.ls.next_if_char(')') && !self.ls.next_if_char('(') {
+                    return Err(Error::syntactical(
+                        self.ls.linenumber(),
+                        "expected: '(' or ')'".to_owned(),
+                        self.ls.current().to_string(),
+                    ));
+                }
+            }
+            Token::Name(name) => {
+                //TODO find var
+                exp.kind = ExpKind::Vararg;
+                exp.var = Some(name);
+            }
+            _ => {
+                return Err(Error::syntactical(
+                    self.ls.linenumber(),
+                    "expected: <name> or '(' expr ')'".to_owned(),
+                    self.ls.current().to_string(),
+                ))
+            }
+        }
+        return Ok(());
     }
 
     /* stat -> func | assignment */
