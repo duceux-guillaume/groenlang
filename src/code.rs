@@ -48,7 +48,6 @@ impl BinOpr {
             Char('~') => Some(BXor),
             Shl => Some(ShL),
             Shr => Some(ShR),
-            Token::Concat => Some(BinOpr::Concat),
             Ne => Some(NE),
             Token::Eq => Some(BinOpr::Eq),
             Char('<') => Some(LT),

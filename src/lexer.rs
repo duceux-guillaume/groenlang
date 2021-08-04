@@ -26,7 +26,6 @@ pub enum Token {
     While,
     /* other terminal symbols */
     Idiv,
-    Concat,
     Dots,
     Eq,
     Ge,
@@ -53,7 +52,7 @@ impl Token {
             ("elseif", ElseIf),
             ("false", False),
             ("for", For),
-            ("function", Function),
+            ("fn", Function),
             ("goto", Goto),
             ("if", If),
             ("in", In),
@@ -315,16 +314,33 @@ impl LexState {
         matches!(self.current, '\n' | '\r')
     }
 
-    pub fn next_if_token(&mut self, c: Token) -> bool {
+    pub fn next_if_token(&mut self, c: Token) -> GResult<bool> {
         if self.token == c {
-            self.next();
-            return true;
+            self.next()?;
+            return Ok(true);
         }
-        return false;
+        return Ok(false);
     }
 
-    pub fn next_if_char(&mut self, c: char) -> bool {
+    pub fn check_next_is_token(&mut self, c: Token) -> GResult<()> {
+        let moved = self.next_if_token(c.clone())?;
+        return if !moved {
+            Err(Error::syntactical(
+                self.linenumber,
+                c.to_string(),
+                self.token.to_string(),
+            ))
+        } else {
+            Ok(())
+        };
+    }
+
+    pub fn next_if_char(&mut self, c: char) -> GResult<bool> {
         return self.next_if_token(Token::Char(c));
+    }
+
+    pub fn check_next_is_char(&mut self, c: char) -> GResult<()> {
+        return self.check_next_is_token(Token::Char(c));
     }
 }
 
@@ -347,19 +363,21 @@ mod tests {
     }
 
     #[test]
-    fn lexer_next_if_token() {
+    fn lexer_next_if_token() -> GResult<()> {
         let mut lexer = LexState::new(String::from("="));
-        assert_eq!(lexer.next_if_token(Token::Char('=')), false);
+        assert_eq!(lexer.next_if_token(Token::Char('='))?, false);
         lexer.next();
-        assert_eq!(lexer.next_if_token(Token::Char('=')), true);
+        assert_eq!(lexer.next_if_token(Token::Char('='))?, true);
+        return Ok(());
     }
 
     #[test]
-    fn lexer_next_if_char() {
+    fn lexer_next_if_char() -> GResult<()> {
         let mut lexer = LexState::new(String::from("="));
-        assert_eq!(lexer.next_if_char('='), false);
+        assert_eq!(lexer.next_if_char('=')?, false);
         lexer.next();
-        assert_eq!(lexer.next_if_char('='), true);
+        assert_eq!(lexer.next_if_char('=')?, true);
+        return Ok(());
     }
 
     #[test]

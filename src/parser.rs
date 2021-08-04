@@ -249,8 +249,8 @@ impl Parser {
             Repeat => { /* stat -> repeatstat */
                 //repeatstat(ls, line);
             }
-            Function => { /* stat -> funcstat */
-                //funcstat(ls, line);
+            Function => {
+                self.function_statement()?;
             }
             Let => {
                 /* stat -> localstat */
@@ -288,6 +288,33 @@ impl Parser {
         //ls->fs->freereg = luaY_nvarstack(ls->fs);  /* free registers */
         //leavelevel(ls);
         return Ok(());
+    }
+
+    /* funcstat -> FN funcname body */
+    fn function_statement(&mut self) -> GResult<()> {
+        self.ls.next()?;
+        //let mut fname = self.ls.current();
+        //FIXME: use name
+        self.ls.next()?;
+        let mut fbody = ExpDesc::new();
+        return self.body(&mut fbody, true);
+    }
+
+    fn body(&mut self, fbody: &mut ExpDesc, ismethod: bool) -> GResult<()> {
+        let mut new_fs = FuncState::new();
+        //new_fs.f = self.add_prototype();
+        //new_fs.f.linedefined = self.ls.linenumber();
+        new_fs.enter_block();
+        //self.fs = new_fs;
+        self.parlist()?;
+        self.block()?;
+        return Ok(());
+    }
+
+    /* parlist -> [ {NAME ','} (NAME | '...') ] */
+    fn parlist(&mut self) -> GResult<()> {
+        self.ls.check_next_is_char('(')?;
+        return self.ls.check_next_is_char(')');
     }
 
     /* stat -> LOCAL NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
@@ -425,7 +452,7 @@ impl Parser {
             Token::Char('(') => {
                 self.ls.next()?;
                 self.expression(exp)?;
-                if !self.ls.next_if_char(')') && !self.ls.next_if_char('(') {
+                if !self.ls.next_if_char(')')? && !self.ls.next_if_char('(')? {
                     return Err(Error::syntactical(
                         self.ls.linenumber(),
                         "expected: '(' or ')'".to_owned(),
@@ -473,7 +500,7 @@ impl Parser {
         while self.ls.current() == Token::ElseIf {
             self.test_then_block()?; /* ELSEIF cond THEN block */
         }
-        if self.ls.next_if_token(Token::Else) {
+        if self.ls.next_if_token(Token::Else)? {
             self.block()?; /* 'else' part */
         }
         self.expect_next(Token::Char('}'))?;
@@ -496,7 +523,7 @@ impl Parser {
             self.ls.next()?; /* skip 'break' */
             self.fs.enter_block(); /* must enter block before 'goto' */
             //newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
-            while self.ls.next_if_char(';') {} /* skip semicolons */
+            while self.ls.next_if_char(';')? {} /* skip semicolons */
             if self.block_follow(false) {
                 /* jump is the entire block? */
                 self.fs.leave_block();
@@ -520,7 +547,7 @@ impl Parser {
     }
 
     fn expect_next(&mut self, t: Token) -> GResult<()> {
-        if !self.ls.next_if_token(t.clone()) {
+        if !self.ls.next_if_token(t.clone())? {
             return Err(Error::syntactical(
                 self.ls.linenumber(),
                 t.to_string(),
@@ -530,13 +557,12 @@ impl Parser {
         return Ok(());
     }
 
+    /* block -> { statlist } */
     fn block(&mut self) -> GResult<()> {
-        /* block -> statlist */
-        //FuncState *fs = ls->fs;
-        //BlockCnt bl;
-        //enterblock(fs, &bl, 0);
+        self.ls.check_next_is_char('{')?;
+        self.fs.enter_block();
         self.statlist()?;
-        //leaveblock(fs);
-        return Ok(());
+        self.fs.leave_block();
+        return self.ls.check_next_is_char('}');
     }
 }
